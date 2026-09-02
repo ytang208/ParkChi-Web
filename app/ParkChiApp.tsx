@@ -1,0 +1,126 @@
+'use client';
+
+import { Bell, CalendarClock, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, LocateFixed, MapPin, Navigation, Plus, Repeat2, Signpost, Sparkles, Trash2, X } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+
+type Tab = 'parked' | 'street' | 'renewals';
+type ParkingSpot = { note: string; savedAt: string; moveBy?: string; latitude?: number; longitude?: number; photo?: string };
+type StreetReminder = { id: string; title: string; details: string; date: string; repeat: boolean };
+type Renewal = { id: string; kind: string; date: string; note: string };
+type Snapshot = { spot: ParkingSpot | null; street: StreetReminder[]; renewals: Renewal[] };
+type ParkChiDocument = Document & { modelContext?: { registerTool: (tool: { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: unknown) => unknown }, options?: { signal?: AbortSignal }) => void | Promise<void> } };
+
+const STORAGE_KEY = 'parkchi.web.v1';
+const emptySnapshot: Snapshot = { spot: null, street: [], renewals: [] };
+const uid = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now());
+const formatDate = (value: string, withTime = true) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(withTime ? { hour: 'numeric', minute: '2-digit' } : {}) }).format(new Date(value));
+const toInputDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+
+export default function Home() {
+  const [tab, setTab] = useState<Tab>('parked');
+  const [data, setData] = useState<Snapshot>(emptySnapshot);
+  const [ready, setReady] = useState(false);
+  const [modal, setModal] = useState<'spot' | 'street' | 'renewal' | null>(null);
+  const [toast, setToast] = useState('');
+
+  useEffect(() => {
+    try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) setData(JSON.parse(saved)); }
+    catch { localStorage.removeItem(STORAGE_KEY); }
+    setReady(true);
+  }, []);
+  useEffect(() => { if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, ready]);
+  useEffect(() => {
+    const context = (document as ParkChiDocument).modelContext;
+    if (!context?.registerTool) return;
+    const lifecycle = new AbortController();
+    void Promise.resolve(context.registerTool({
+      name: 'save_parking_spot',
+      title: 'Save parking spot',
+      description: 'Save or update the user’s parked-car note and optional move-by time in ParkChi.',
+      inputSchema: { type: 'object', properties: { note: { type: 'string' }, moveBy: { type: 'string', description: 'Optional ISO 8601 date-time' } }, required: ['note'], additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute(input) {
+        const values = input as { note?: unknown; moveBy?: unknown };
+        if (typeof values.note !== 'string' || !values.note.trim()) throw new Error('A parking note is required.');
+        if (values.moveBy !== undefined && (typeof values.moveBy !== 'string' || Number.isNaN(Date.parse(values.moveBy)))) throw new Error('moveBy must be a valid ISO date-time.');
+        const spot: ParkingSpot = { note: values.note.trim(), savedAt: new Date().toISOString(), moveBy: values.moveBy as string | undefined };
+        setData((current) => ({ ...current, spot }));
+        setTab('parked');
+        return { status: 'saved', note: spot.note, moveBy: spot.moveBy ?? null };
+      },
+    }, { signal: lifecycle.signal })).catch(() => undefined);
+    return () => lifecycle.abort();
+  }, []);
+  function notify(message: string) { setToast(message); window.setTimeout(() => setToast(''), 2600); }
+
+  return (
+    <main className="app-shell">
+      <aside className="side-rail">
+        <a className="brand" href="#top" aria-label="ParkChi home"><span className="brand-mark"><CircleParking size={25} strokeWidth={2.4} /></span><span>ParkChi</span></a>
+        <nav className="nav-stack" aria-label="Main navigation">
+          <NavButton active={tab === 'parked'} icon={<CarFront />} label="Parked car" onClick={() => setTab('parked')} />
+          <NavButton active={tab === 'street'} icon={<Signpost />} label="Street reminders" onClick={() => setTab('street')} />
+          <NavButton active={tab === 'renewals'} icon={<CalendarClock />} label="Renewals" onClick={() => setTab('renewals')} />
+        </nav>
+        <div className="rail-note"><Sparkles size={18} /><p><strong>Made for Chicago</strong><br />Your parking details stay in this browser.</p></div>
+      </aside>
+
+      <section className="workspace" id="top">
+        <header className="topbar">
+          <div><p className="eyebrow">Chicago parking companion</p><h1>{tab === 'parked' ? 'Where’s your car?' : tab === 'street' ? 'Street reminders' : 'Vehicle renewals'}</h1></div>
+          <button className="primary compact" onClick={() => setModal(tab === 'parked' ? 'spot' : tab === 'street' ? 'street' : 'renewal')}>
+            {tab === 'parked' && data.spot ? 'Update spot' : <><Plus size={18} /> Add {tab === 'parked' ? 'spot' : 'reminder'}</>}
+          </button>
+        </header>
+        {tab === 'parked' && <ParkingView spot={data.spot} onSave={() => setModal('spot')} onClear={() => { setData({ ...data, spot: null }); notify('Parking spot cleared'); }} />}
+        {tab === 'street' && <StreetView items={data.street} onAdd={() => setModal('street')} onDelete={(id) => setData({ ...data, street: data.street.filter((item) => item.id !== id) })} />}
+        {tab === 'renewals' && <RenewalsView items={data.renewals} onAdd={() => setModal('renewal')} onDelete={(id) => setData({ ...data, renewals: data.renewals.filter((item) => item.id !== id) })} />}
+      </section>
+
+      <nav className="mobile-tabs" aria-label="Main navigation">
+        <NavButton active={tab === 'parked'} icon={<CarFront />} label="Parked" onClick={() => setTab('parked')} />
+        <NavButton active={tab === 'street'} icon={<Signpost />} label="Street" onClick={() => setTab('street')} />
+        <NavButton active={tab === 'renewals'} icon={<CalendarClock />} label="Renewals" onClick={() => setTab('renewals')} />
+      </nav>
+      {modal === 'spot' && <SpotModal existing={data.spot} onClose={() => setModal(null)} onSave={(spot) => { setData({ ...data, spot }); setModal(null); notify('Parking spot saved'); }} />}
+      {modal === 'street' && <StreetModal onClose={() => setModal(null)} onSave={(item) => { setData({ ...data, street: [...data.street, item].sort((a, b) => a.date.localeCompare(b.date)) }); setModal(null); notify('Street reminder added'); }} />}
+      {modal === 'renewal' && <RenewalModal onClose={() => setModal(null)} onSave={(item) => { setData({ ...data, renewals: [...data.renewals, item].sort((a, b) => a.date.localeCompare(b.date)) }); setModal(null); notify('Renewal saved'); }} />}
+      {toast && <div className="toast" role="status"><Check size={18} /> {toast}</div>}
+    </main>
+  );
+}
+
+function NavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) { return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span></button>; }
+
+function ParkingView({ spot, onSave, onClear }: { spot: ParkingSpot | null; onSave: () => void; onClear: () => void }) {
+  const directions = spot?.latitude && spot?.longitude ? `https://www.google.com/maps/dir/?api=1&destination=${spot.latitude},${spot.longitude}` : spot?.note ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spot.note)}` : '#';
+  return <div className="parking-layout">
+    <section className="map-card" aria-label="Chicago parking map"><div className="map-grid"><span className="lake" /><span className="river river-one" /><span className="river river-two" /></div><div className="map-label loop">THE LOOP</div><div className="map-label west">WEST LOOP</div><div className="map-label river-north">RIVER NORTH</div><div className="route route-one" /><div className="route route-two" /><div className="route route-three" /><div className="map-pill"><span className="live-dot" /> {spot ? 'Your parked car' : 'Chicago'}</div><div className={`pin ${spot ? 'saved' : ''}`}><MapPin size={29} fill="currentColor" /><span>{spot ? 'Parked here' : 'Downtown'}</span></div><div className="map-controls"><button aria-label="Find my location"><LocateFixed size={20} /></button><button aria-label="Map navigation"><Navigation size={20} /></button></div></section>
+    <aside className="spot-panel">{spot ? <><div className="status-line"><span className="check-badge"><Check size={17} /></span><div><p className="kicker">Car saved</p><p className="muted">{formatDate(spot.savedAt)}</p></div></div><h2>{spot.note || 'Saved parking location'}</h2>{spot.moveBy && <div className="alert-card"><Clock3 size={21} /><div><strong>Move your car by</strong><span>{formatDate(spot.moveBy)}</span></div></div>}{spot.photo && <img className="sign-photo" src={spot.photo} alt="Saved parking sign" />}<a className="primary full" href={directions} target="_blank" rel="noreferrer"><Navigation size={19} /> Get directions</a><div className="split-actions"><button className="secondary" onClick={onSave}>Edit details</button><button className="danger" onClick={onClear}><Trash2 size={17} /> Clear</button></div></> : <><div className="empty-icon"><CarFront size={31} /></div><p className="kicker">Ready when you are</p><h2>Never lose your parking spot again.</h2><p className="muted body-copy">Save your location, add a note about the block, and set a reminder before the meter or restriction begins.</p><button className="primary full" onClick={onSave}><MapPin size={19} /> Save my parking spot</button></>}<p className="safety"><Bell size={15} /> Always check posted parking signs.</p></aside>
+  </div>;
+}
+
+function StreetView({ items, onAdd, onDelete }: { items: StreetReminder[]; onAdd: () => void; onDelete: (id: string) => void }) { return <ListSurface icon={<Signpost size={30} />} title="Keep ahead of street cleaning" description="Save dates from signs near your regular parking spots. Schedules can change, so always verify the block before parking." empty={items.length === 0} onAdd={onAdd}>{items.map((item) => <article className="list-row" key={item.id}><DateTile value={item.date} /><div className="list-copy"><h3>{item.title}</h3><p>{formatDate(item.date)}</p>{item.details && <small>{item.details}</small>}</div>{item.repeat && <span className="repeat"><Repeat2 size={16} /> Weekly</span>}<button className="icon-danger" aria-label={`Delete ${item.title}`} onClick={() => onDelete(item.id)}><Trash2 size={17} /></button></article>)}</ListSurface>; }
+function RenewalsView({ items, onAdd, onDelete }: { items: Renewal[]; onAdd: () => void; onDelete: (id: string) => void }) { return <ListSurface icon={<CalendarClock size={30} />} title="Put every deadline in one place" description="Track city stickers, plates, permits, and emissions tests. ParkChi keeps everything on this device." empty={items.length === 0} onAdd={onAdd}>{items.map((item) => <article className="list-row" key={item.id}><DateTile value={item.date} /><div className="list-copy"><h3>{item.kind}</h3><p>Due {formatDate(item.date, false)}</p>{item.note && <small>{item.note}</small>}</div><button className="icon-danger" aria-label={`Delete ${item.kind}`} onClick={() => onDelete(item.id)}><Trash2 size={17} /></button></article>)}</ListSurface>; }
+function ListSurface({ icon, title, description, empty, onAdd, children }: { icon: React.ReactNode; title: string; description: string; empty: boolean; onAdd: () => void; children: React.ReactNode }) { return <div className="list-layout"><section className="intro-card"><div className="intro-icon">{icon}</div><p className="eyebrow">Plan ahead</p><h2>{title}</h2><p>{description}</p><button className="primary" onClick={onAdd}><Plus size={18} /> Add reminder</button></section><section className="items-card">{empty ? <div className="empty-state"><CalendarClock size={38} /><h3>Nothing due yet</h3><p>Your saved reminders will appear here in date order.</p><button className="text-button" onClick={onAdd}>Create your first reminder <ChevronRight size={17} /></button></div> : children}</section></div>; }
+function DateTile({ value }: { value: string }) { const date = new Date(value); return <div className="date-tile"><span>{date.toLocaleDateString('en-US', { month: 'short' })}</span><strong>{date.getDate()}</strong></div>; }
+function ModalFrame({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) { return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header><div><p className="eyebrow">ParkChi</p><h2 id="modal-title">{title}</h2><p>{subtitle}</p></div><button className="close-button" onClick={onClose} aria-label="Close"><X size={21} /></button></header>{children}</section></div>; }
+
+function SpotModal({ existing, onClose, onSave }: { existing: ParkingSpot | null; onClose: () => void; onSave: (spot: ParkingSpot) => void }) {
+  const [note, setNote] = useState(existing?.note || ''); const [moveBy, setMoveBy] = useState(existing?.moveBy || '');
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(existing?.latitude && existing?.longitude ? { latitude: existing.latitude, longitude: existing.longitude } : null);
+  const [locating, setLocating] = useState(false); const [locationMessage, setLocationMessage] = useState(coords ? 'Location is saved' : 'Add your location for one-tap directions'); const [photo, setPhoto] = useState(existing?.photo || '');
+  function locate() { setLocating(true); navigator.geolocation?.getCurrentPosition((position) => { setCoords({ latitude: position.coords.latitude, longitude: position.coords.longitude }); setLocationMessage('Current location added'); setLocating(false); }, () => { setLocationMessage('Location unavailable — your note will still be saved'); setLocating(false); }, { enableHighAccuracy: true, timeout: 8000 }); }
+  function submit(event: FormEvent) { event.preventDefault(); onSave({ note: note.trim(), savedAt: new Date().toISOString(), moveBy: moveBy ? new Date(moveBy).toISOString() : undefined, ...coords, photo: photo || undefined }); }
+  return <ModalFrame title={existing ? 'Update parking spot' : 'Save parking spot'} subtitle="Add enough detail to make the walk back effortless." onClose={onClose}><form onSubmit={submit} className="form-stack"><label>Where did you park?<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="West side of Damen near Waveland" rows={3} autoFocus /></label><button type="button" className={`location-button ${coords ? 'complete' : ''}`} onClick={locate}><span>{coords ? <Check size={20} /> : <LocateFixed size={20} />}</span><div><strong>{locating ? 'Finding you…' : coords ? 'Location added' : 'Use current location'}</strong><small>{locationMessage}</small></div><ChevronRight size={18} /></button><label>Move reminder <span className="optional">optional</span><input type="datetime-local" value={moveBy ? toInputDate(new Date(moveBy)) : ''} min={toInputDate(new Date())} onChange={(e) => setMoveBy(e.target.value)} /></label><label className="photo-picker"><input type="file" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = () => setPhoto(String(reader.result)); reader.readAsDataURL(file); } }} /><Camera size={20} /><span>{photo ? 'Replace sign photo' : 'Add parking sign photo'}</span></label>{photo && <img className="photo-preview" src={photo} alt="Parking sign preview" />}<button className="primary full" type="submit"><MapPin size={19} /> Save parking spot</button></form></ModalFrame>;
+}
+
+function StreetModal({ onClose, onSave }: { onClose: () => void; onSave: (item: StreetReminder) => void }) {
+  const [title, setTitle] = useState('Street cleaning'); const [details, setDetails] = useState(''); const [date, setDate] = useState(toInputDate(new Date(Date.now() + 86_400_000))); const [repeat, setRepeat] = useState(false);
+  return <ModalFrame title="New street reminder" subtitle="Copy the date and details from the posted sign." onClose={onClose}><form className="form-stack" onSubmit={(e) => { e.preventDefault(); onSave({ id: uid(), title: title.trim(), details: details.trim(), date: new Date(date).toISOString(), repeat }); }}><label>Reminder title<input value={title} onChange={(e) => setTitle(e.target.value)} required /></label><label>Block or sign details<textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={2} placeholder="Zone, side of street, or cross street" /></label><label>Date and time<input type="datetime-local" value={date} min={toInputDate(new Date())} onChange={(e) => setDate(e.target.value)} required /></label><label className="check-row"><input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} /><span>Repeat every week</span></label><button className="primary full"><Bell size={18} /> Add street reminder</button></form></ModalFrame>;
+}
+
+function RenewalModal({ onClose, onSave }: { onClose: () => void; onSave: (item: Renewal) => void }) {
+  const [kind, setKind] = useState('City sticker'); const [date, setDate] = useState(toInputDate(new Date(Date.now() + 30 * 86_400_000)).slice(0, 10)); const [note, setNote] = useState(''); const options = useMemo(() => ['City sticker', 'License plate', 'Residential permit', 'Emissions test', 'Other'], []);
+  return <ModalFrame title="New vehicle renewal" subtitle="Save the deadline now, and future you will thank you." onClose={onClose}><form className="form-stack" onSubmit={(e) => { e.preventDefault(); onSave({ id: uid(), kind, date: new Date(`${date}T12:00:00`).toISOString(), note: note.trim() }); }}><label>Renewal type<select value={kind} onChange={(e) => setKind(e.target.value)}>{options.map((option) => <option key={option}>{option}</option>)}</select></label><label>Due date<input type="date" value={date} min={toInputDate(new Date()).slice(0, 10)} onChange={(e) => setDate(e.target.value)} required /></label><label>Note <span className="optional">optional</span><textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Plate, permit zone, or other detail" /></label><button className="primary full"><CalendarClock size={18} /> Save renewal</button></form></ModalFrame>;
+}
