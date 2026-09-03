@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, CalendarClock, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, LocateFixed, MapPin, Navigation, Plus, Repeat2, Share2, Signpost, Sparkles, Trash2, X } from 'lucide-react';
+import { BatteryFull, Bell, CalendarClock, CalendarDays, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, Compass, Grid3X3, ListTodo, LocateFixed, MapPin, Navigation, Plus, Repeat2, Search, Share2, Signpost, Sparkles, Tag, Trash2, WalletCards, Wifi, X } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 type Tab = 'parked' | 'street' | 'renewals';
@@ -8,6 +8,7 @@ type ParkingSpot = { note: string; savedAt: string; moveBy?: string; latitude?: 
 type StreetReminder = { id: string; title: string; details: string; date: string; repeat: boolean };
 type Renewal = { id: string; kind: string; date: string; note: string };
 type Snapshot = { spot: ParkingSpot | null; street: StreetReminder[]; renewals: Renewal[] };
+type LauncherApp = { name: string; detail: string; icon: React.ReactNode; tone: string; ready: boolean; action?: () => void };
 type ParkChiDocument = Document & { modelContext?: { registerTool: (tool: { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: unknown) => unknown }, options?: { signal?: AbortSignal }) => void | Promise<void> } };
 
 const STORAGE_KEY = 'parkchi.web.v1';
@@ -47,6 +48,41 @@ async function createParkingShareCard(spot: ParkingSpot) {
 }
 
 export default function Home() {
+  const [screen, setScreen] = useState<'home' | 'parkchi'>('home');
+  return screen === 'home' ? <AppLauncher onOpenParkChi={() => setScreen('parkchi')} /> : <ParkChiApp onHome={() => setScreen('home')} />;
+}
+
+function AppLauncher({ onOpenParkChi }: { onOpenParkChi: () => void }) {
+  const [query, setQuery] = useState(''); const [notice, setNotice] = useState('');
+  const now = new Date(); const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
+  const apps: LauncherApp[] = [
+    { name: 'ParkChi', detail: 'Parking companion', icon: <CircleParking />, tone: 'parkchi', ready: true, action: onOpenParkChi },
+    { name: 'Chicago Events', detail: 'Find something fun', icon: <Compass />, tone: 'events', ready: false },
+    { name: 'Budget', detail: 'Track your spending', icon: <WalletCards />, tone: 'budget', ready: false },
+    { name: 'Tomorrow', detail: 'Plan your next day', icon: <ListTodo />, tone: 'tomorrow', ready: false },
+    { name: 'Deals', detail: 'Save nearby', icon: <Tag />, tone: 'deals', ready: false },
+    { name: 'Calendar', detail: 'See what is next', icon: <CalendarDays />, tone: 'calendar', ready: false },
+  ];
+  const visibleApps = apps.filter((app) => app.name.toLowerCase().includes(query.toLowerCase()));
+  function openApp(app: LauncherApp) { if (app.ready && app.action) app.action(); else { setNotice(`${app.name} is coming soon.`); window.setTimeout(() => setNotice(''), 2200); } }
+  return <main className="launcher-shell">
+    <div className="wallpaper-orb orb-one" /><div className="wallpaper-orb orb-two" />
+    <header className="launcher-status"><strong>{now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</strong><span>My Apps</span><div><Wifi size={18} /><BatteryFull size={21} /></div></header>
+    <section className="launcher-content">
+      <div className="launcher-heading"><p>{greeting}</p><h1>What would you like to do?</h1></div>
+      <div className="launcher-widgets">
+        <article className="city-widget"><div><span>CHICAGO</span><h2>Your city, simplified.</h2><p>Useful tools for everyday life, all in one place.</p></div><span className="city-star"><Sparkles size={26} /></span></article>
+        <article className="date-widget"><span>{now.toLocaleDateString('en-US', { weekday: 'long' })}</span><strong>{now.getDate()}</strong><p>{now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p></article>
+      </div>
+      <label className="app-search"><Search size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search apps" /></label>
+      <section className="apps-section" aria-labelledby="apps-title"><div className="section-title"><h2 id="apps-title">Apps</h2><span>{apps.filter((app) => app.ready).length} available</span></div><div className="app-grid">{visibleApps.map((app) => <button className="app-tile" key={app.name} onClick={() => openApp(app)}><span className={`app-icon ${app.tone}`}>{app.icon}</span><span className="app-name">{app.name}</span><small>{app.detail}</small><em>{app.ready ? 'Open' : 'Coming soon'}</em></button>)}</div>{visibleApps.length === 0 && <div className="no-apps">No apps match “{query}”.</div>}</section>
+    </section>
+    <div className="launcher-dock"><button onClick={onOpenParkChi}><span className="dock-icon parkchi"><CircleParking /></span><small>ParkChi</small></button><span className="dock-divider" /><div><Grid3X3 size={20} /><span>More apps are on the way</span></div></div>
+    {notice && <div className="launcher-notice" role="status">{notice}</div>}
+  </main>;
+}
+
+function ParkChiApp({ onHome }: { onHome: () => void }) {
   const [tab, setTab] = useState<Tab>('parked');
   const [data, setData] = useState<Snapshot>(emptySnapshot);
   const [ready, setReady] = useState(false);
@@ -87,6 +123,7 @@ export default function Home() {
     <main className="app-shell">
       <aside className="side-rail">
         <a className="brand" href="#top" aria-label="ParkChi home"><span className="brand-mark"><CircleParking size={25} strokeWidth={2.4} /></span><span>ParkChi</span></a>
+        <button className="rail-home" onClick={onHome}><Grid3X3 size={18} /> All apps</button>
         <nav className="nav-stack" aria-label="Main navigation">
           <NavButton active={tab === 'parked'} icon={<CarFront />} label="Parked car" onClick={() => setTab('parked')} />
           <NavButton active={tab === 'street'} icon={<Signpost />} label="Street reminders" onClick={() => setTab('street')} />
@@ -96,6 +133,7 @@ export default function Home() {
       </aside>
 
       <section className="workspace" id="top">
+        <button className="mobile-home" onClick={onHome}><Grid3X3 size={17} /> All apps</button>
         <header className="topbar">
           <div><p className="eyebrow">Chicago parking companion</p><h1>{tab === 'parked' ? 'Where’s your car?' : tab === 'street' ? 'Street reminders' : 'Vehicle renewals'}</h1></div>
           <button className="primary compact" onClick={() => setModal(tab === 'parked' ? 'spot' : tab === 'street' ? 'street' : 'renewal')}>
