@@ -1,8 +1,8 @@
 'use client';
 
-import { ArrowLeft, ChevronLeft, ChevronRight, Heart, MapPin, RotateCcw, Star, Users, Wine } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Heart, MapPin, MessageCircle, Pencil, RotateCcw, Send, ThumbsDown, ThumbsUp, Users, Wine, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { observeBarRankings, saveBarRanking, type BarRanking, type SignedInUser } from './firebase';
+import { addBarComment, observeBarSocial, saveBarRanking, setBarReaction, updateBarPostText, type BarRanking, type BarSocialData, type SignedInUser } from './firebase';
 
 type Props = { user: SignedInUser | null; onHome: () => void; onSignIn: () => void };
 type Bar = { id: string; name: string; neighborhood: string; kind: string; address: string; blurb: string };
@@ -63,30 +63,30 @@ const barPhotos: Record<string, string> = {
 
 export default function BarSwipeApp({ user, onHome, onSignIn }: Props) {
   const [view, setView] = useState<'swipe' | 'community'>('swipe');
-  const [rankings, setRankings] = useState<BarRanking[]>([]);
+  const [social, setSocial] = useState<BarSocialData>({ rankings: [], reactions: {}, comments: {} });
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
   const dragStart = useRef<number | null>(null);
   const [dragX, setDragX] = useState(0); const [exiting, setExiting] = useState(false);
-  useEffect(() => user ? observeBarRankings(setRankings) : undefined, [user?.uid]);
-  const mine = useMemo(() => new Map(rankings.filter((rating) => rating.uid === user?.uid).map((rating) => [rating.barId, rating])), [rankings, user?.uid]);
+  useEffect(() => user ? observeBarSocial(setSocial) : undefined, [user?.uid]);
+  const mine = useMemo(() => new Map(social.rankings.filter((rating) => rating.uid === user?.uid).map((rating) => [rating.barId, rating])), [social.rankings, user?.uid]);
   const remaining = bars.filter((bar) => !mine.has(bar.id)); const current = remaining[0];
-  const community = useMemo(() => [...rankings].sort((a, b) => b.updatedAt - a.updatedAt), [rankings]);
-  async function rank(score: number) {
+  const community = useMemo(() => [...social.rankings].sort((a, b) => b.updatedAt - a.updatedAt), [social.rankings]);
+  async function rank(choice: 'like' | 'pass') {
     if (!user || !current || busy) return;
     setBusy(true); setNotice('');
     try {
-      await saveBarRanking(user, { barId: current.id, barName: current.name, neighborhood: current.neighborhood, score });
-      const saved: BarRanking = { uid: user.uid, displayName: user.displayName || user.email?.split('@')[0] || 'Chicago user', barId: current.id, barName: current.name, neighborhood: current.neighborhood, score, updatedAt: Date.now() };
-      setRankings((items) => [...items.filter((item) => item.uid !== user.uid || item.barId !== current.id), saved]);
+      await saveBarRanking(user, { barId: current.id, barName: current.name, neighborhood: current.neighborhood, choice });
+      const saved: BarRanking = { uid: user.uid, displayName: user.displayName || user.email?.split('@')[0] || 'Chicago user', barId: current.id, barName: current.name, neighborhood: current.neighborhood, choice, updatedAt: Date.now() };
+      setSocial((data) => ({ ...data, rankings: [...data.rankings.filter((item) => item.uid !== user.uid || item.barId !== current.id), saved] }));
     }
     catch { setNotice('Could not save that ranking. Please try again.'); }
     finally { setBusy(false); }
   }
-  async function swipe(score: number, direction: -1 | 1) {
+  async function swipe(choice: 'like' | 'pass', direction: -1 | 1) {
     if (!current || busy || exiting) return;
     setExiting(true); setDragX(direction * Math.max(window.innerWidth, 700));
     await new Promise((resolve) => window.setTimeout(resolve, 240));
-    await rank(score); setDragX(0); setExiting(false);
+    await rank(choice); setDragX(0); setExiting(false);
   }
   if (!user) return <main className="bars-shell bars-gate"><button className="bars-back" onClick={onHome}><ArrowLeft size={18} /> All apps</button><section><span className="bars-logo"><Wine /></span><p className="bars-kicker">North Side picks</p><h1>Swipe your way to a better night out.</h1><p>Sign in to rank bars and see what everyone else picked.</p><button className="bars-signin" onClick={onSignIn}>Sign in with Google</button></section></main>;
   return <main className="bars-shell">
@@ -94,20 +94,29 @@ export default function BarSwipeApp({ user, onHome, onSignIn }: Props) {
     <nav className="bars-tabs"><button className={view === 'swipe' ? 'active' : ''} onClick={() => setView('swipe')}><Heart size={17} /> Swipe</button><button className={view === 'community' ? 'active' : ''} onClick={() => setView('community')}><Users size={17} /> Who ranked what</button></nav>
     {view === 'swipe' ? <section className="swipe-stage">
       <div className="swipe-progress"><span>{mine.size} of {bars.length} ranked</span><div><i style={{ width: `${mine.size / bars.length * 100}%` }} /></div></div>
-      {current ? <article className={`bar-card ${exiting ? 'exiting' : ''}`} style={{ transform: `translateX(${dragX}px) rotate(${dragX / 22}deg)`, opacity: exiting ? 0 : Math.max(.62, 1 - Math.abs(dragX) / 650) }} onPointerDown={(event) => { if (busy || exiting) return; dragStart.current = event.clientX; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { if (dragStart.current !== null && !exiting) setDragX(event.clientX - dragStart.current); }} onPointerUp={(event) => { if (dragStart.current === null) return; const distance = event.clientX - dragStart.current; dragStart.current = null; if (distance > 100) void swipe(5, 1); else if (distance < -100) void swipe(1, -1); else setDragX(0); }} onPointerCancel={() => { dragStart.current = null; setDragX(0); }}>
+      {current ? <article className={`bar-card ${exiting ? 'exiting' : ''}`} style={{ transform: `translateX(${dragX}px) rotate(${dragX / 22}deg)`, opacity: exiting ? 0 : Math.max(.62, 1 - Math.abs(dragX) / 650) }} onPointerDown={(event) => { if (busy || exiting) return; dragStart.current = event.clientX; event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { if (dragStart.current !== null && !exiting) setDragX(event.clientX - dragStart.current); }} onPointerUp={(event) => { if (dragStart.current === null) return; const distance = event.clientX - dragStart.current; dragStart.current = null; if (distance > 100) void swipe('like', 1); else if (distance < -100) void swipe('pass', -1); else setDragX(0); }} onPointerCancel={() => { dragStart.current = null; setDragX(0); }}>
         <div className="swipe-stamp dislike" style={{ opacity: Math.max(0, -dragX / 120) }}>PASS</div><div className="swipe-stamp like" style={{ opacity: Math.max(0, dragX / 120) }}>LOVE</div>
         <div className="bar-photo" style={{ backgroundImage: `linear-gradient(180deg, transparent 20%, rgba(15,5,20,.84)), url(${barPhotos[current.id]})` }}><span>{current.neighborhood}</span><div><p>{current.kind}</p><h1>{current.name}</h1><small><MapPin size={14} /> {current.address}</small></div></div>
-        <div className="bar-details"><p>{current.blurb}</p><small>Swipe left or right, or tap a rating.</small></div>
-        <div className="rating-actions" aria-label={`Rate ${current.name}`}>{[1,2,3,4,5].map((score) => <button key={score} disabled={busy || exiting} onClick={() => void swipe(score, score < 3 ? -1 : 1)} aria-label={`${score} out of 5 stars`}><Star size={20} fill={score >= 4 ? 'currentColor' : 'none'} /><span>{score}</span></button>)}</div>
+        <div className="bar-details"><p>{current.blurb}</p><small>Swipe left to pass or right to like.</small></div>
+        <div className="choice-actions"><button className="pass" disabled={busy || exiting} onClick={() => void swipe('pass', -1)}><X size={23} /> Pass</button><button className="love" disabled={busy || exiting} onClick={() => void swipe('like', 1)}><Heart size={22} fill="currentColor" /> Like</button></div>
         <div className="swipe-hints"><span><ChevronLeft /> Not for me</span><span>Love it <ChevronRight /></span></div>
       </article> : <div className="bars-complete"><Heart size={42} /><h2>You ranked the whole list.</h2><p>Your picks are saved to your account.</p><button onClick={() => setView('community')}><Users size={18} /> See community rankings</button></div>}
       {notice && <p className="bars-error">{notice}</p>}
-    </section> : <Community rankings={community} />}
+    </section> : <Community rankings={community} social={social} user={user} />}
   </main>;
 }
 
-function Community({ rankings }: { rankings: BarRanking[] }) {
+function Community({ rankings, social, user }: { rankings: BarRanking[]; social: BarSocialData; user: SignedInUser }) {
   const [filter, setFilter] = useState('All'); const neighborhoods = ['All', 'Gold Coast', 'Old Town', 'Lincoln Park', 'Wrigleyville'];
+  const [editing, setEditing] = useState(''); const [editText, setEditText] = useState(''); const [drafts, setDrafts] = useState<Record<string, string>>({}); const [working, setWorking] = useState('');
   const visible = rankings.filter((ranking) => filter === 'All' || ranking.neighborhood === filter);
-  return <section className="community-view"><header><div><p className="bars-kicker">Live community feed</p><h1>Who ranked what</h1></div><span>{visible.length} rankings</span></header><div className="neighborhood-filters">{neighborhoods.map((item) => <button className={filter === item ? 'active' : ''} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><div className="ranking-list">{visible.length ? visible.map((ranking) => <article key={`${ranking.barId}-${ranking.uid}`}><span className="rank-avatar">{ranking.displayName.slice(0,1).toUpperCase()}</span><div><strong>{ranking.displayName}</strong><p>ranked <b>{ranking.barName}</b></p><small>{ranking.neighborhood}</small></div><span className="rank-score"><Star size={18} fill="currentColor" /> {ranking.score}/5</span></article>) : <div className="rank-empty"><RotateCcw size={32} /><h2>No rankings here yet.</h2><p>Be the first to swipe on a bar.</p></div>}</div></section>;
+  return <section className="community-view"><header><div><p className="bars-kicker">Live community feed</p><h1>Who ranked what</h1></div><span>{visible.length} posts</span></header><div className="neighborhood-filters">{neighborhoods.map((item) => <button className={filter === item ? 'active' : ''} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div><div className="ranking-list social-feed">{visible.length ? visible.map((ranking) => {
+    const postKey = `${ranking.barId}_${ranking.uid}`; const reactions = social.reactions[postKey] || []; const comments = social.comments[postKey] || []; const myReaction = reactions.find((item) => item.uid === user.uid)?.type; const likes = reactions.filter((item) => item.type === 'like').length; const dislikes = reactions.filter((item) => item.type === 'dislike').length;
+    return <article className="social-post" key={postKey}><div className="post-head"><span className="rank-avatar">{ranking.displayName.slice(0,1).toUpperCase()}</span><div><strong>{ranking.displayName}</strong><p>{ranking.choice === 'like' ? 'liked' : 'passed on'} <b>{ranking.barName}</b></p><small>{ranking.neighborhood}</small></div><span className={`choice-badge ${ranking.choice}`}>{ranking.choice === 'like' ? <Heart size={16} fill="currentColor" /> : <X size={16} />}{ranking.choice}</span></div>
+      {editing === postKey ? <form className="edit-post" onSubmit={async (event) => { event.preventDefault(); setWorking(postKey); try { await updateBarPostText(user, ranking.barId, ranking.choice, editText); setEditing(''); } finally { setWorking(''); } }}><textarea value={editText} maxLength={500} onChange={(event) => setEditText(event.target.value)} placeholder="Add your thoughts about this bar…" autoFocus /><div><button type="button" onClick={() => setEditing('')}>Cancel</button><button disabled={working === postKey}>Save post</button></div></form> : <div className="post-copy">{ranking.postText ? <p>{ranking.postText}</p> : ranking.uid === user.uid ? <p className="post-placeholder">Add a note about your experience.</p> : null}{ranking.uid === user.uid && <button onClick={() => { setEditing(postKey); setEditText(ranking.postText || ''); }}><Pencil size={14} /> Edit post</button>}</div>}
+      <div className="post-actions"><button className={myReaction === 'like' ? 'active' : ''} onClick={() => void setBarReaction(user, postKey, myReaction === 'like' ? null : 'like')}><ThumbsUp size={17} /> {likes || 'Like'}</button><button className={myReaction === 'dislike' ? 'active dislike' : ''} onClick={() => void setBarReaction(user, postKey, myReaction === 'dislike' ? null : 'dislike')}><ThumbsDown size={17} /> {dislikes || 'Dislike'}</button><span><MessageCircle size={17} /> {comments.length}</span></div>
+      {comments.length > 0 && <div className="comments">{comments.map((comment) => <div key={comment.id}><span>{comment.displayName.slice(0,1).toUpperCase()}</span><p><strong>{comment.displayName}</strong>{comment.text}</p></div>)}</div>}
+      <form className="comment-form" onSubmit={async (event) => { event.preventDefault(); const text = drafts[postKey]?.trim(); if (!text) return; setWorking(postKey); try { await addBarComment(user, postKey, text); setDrafts((items) => ({ ...items, [postKey]: '' })); } finally { setWorking(''); } }}><input value={drafts[postKey] || ''} maxLength={500} onChange={(event) => setDrafts((items) => ({ ...items, [postKey]: event.target.value }))} placeholder="Add a comment…" aria-label={`Comment on ${ranking.barName}`} /><button disabled={working === postKey || !drafts[postKey]?.trim()} aria-label="Post comment"><Send size={17} /></button></form>
+    </article>;
+  }) : <div className="rank-empty"><RotateCcw size={32} /><h2>No posts here yet.</h2><p>Be the first to swipe on a bar.</p></div>}</div></section>;
 }

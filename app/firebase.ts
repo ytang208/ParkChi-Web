@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { browserLocalPersistence, getAuth, GoogleAuthProvider, onAuthStateChanged, setPersistence, signInWithPopup, signOut, type User } from 'firebase/auth';
-import { get, getDatabase, onValue, ref, serverTimestamp, set, update } from 'firebase/database';
+import { get, getDatabase, onValue, push, ref, remove, serverTimestamp, set, update } from 'firebase/database';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
 const firebaseConfig = {
@@ -22,7 +22,10 @@ function services() {
 }
 
 export type SignedInUser = Pick<User, 'uid' | 'displayName' | 'email' | 'photoURL'>;
-export type BarRanking = { uid: string; displayName: string; barId: string; barName: string; neighborhood: string; score: number; updatedAt: number };
+export type BarRanking = { uid: string; displayName: string; barId: string; barName: string; neighborhood: string; choice: 'like' | 'pass'; postText?: string; updatedAt: number };
+export type BarReaction = { uid: string; displayName: string; type: 'like' | 'dislike'; updatedAt: number };
+export type BarComment = { id: string; uid: string; displayName: string; text: string; createdAt: number };
+export type BarSocialData = { rankings: BarRanking[]; reactions: Record<string, BarReaction[]>; comments: Record<string, BarComment[]> };
 
 export function observeUser(callback: (user: User | null) => void) {
   const current = services();
@@ -63,15 +66,22 @@ export async function saveParkChiData(uid: string, data: unknown) {
   await set(ref(current.db, `users/${uid}/apps/parkchi`), { data: firebaseSafeData, schemaVersion: 2, updatedAt: serverTimestamp() });
 }
 
-export function observeBarRankings(callback: (rankings: BarRanking[]) => void) {
-  const current = services(); if (!current) { callback([]); return () => undefined; }
-  return onValue(ref(current.db, 'barRankings'), (snapshot) => {
-    const value = snapshot.val() as Record<string, Record<string, BarRanking>> | null;
-    callback(value ? Object.values(value).flatMap((ratings) => Object.values(ratings)) : []);
-  });
+export function observeBarSocial(callback: (data: BarSocialData) => void) {
+  const current = services(); if (!current) { callback({ rankings: [], reactions: {}, comments: {} }); return () => undefined; }
+  let rankings: BarRanking[] = []; let reactions: Record<string, BarReaction[]> = {}; let comments: Record<string, BarComment[]> = {};
+  const emit = () => callback({ rankings, reactions, comments });
+  const stops = [
+    onValue(ref(current.db, 'barRankings'), (snapshot) => {
+      const value = snapshot.val() as Record<string, Record<string, BarRanking & { score?: number }>> | null;
+      rankings = value ? Object.values(value).flatMap((items) => Object.values(items)).map((item) => ({ ...item, choice: item.choice || ((item.score ?? 0) >= 3 ? 'like' : 'pass') })) : []; emit();
+    }),
+    onValue(ref(current.db, 'barPostReactions'), (snapshot) => { const value = snapshot.val() as Record<string, Record<string, BarReaction>> | null; reactions = value ? Object.fromEntries(Object.entries(value).map(([key, items]) => [key, Object.values(items)])) : {}; emit(); }),
+    onValue(ref(current.db, 'barPostComments'), (snapshot) => { const value = snapshot.val() as Record<string, Record<string, Omit<BarComment, 'id'>>> | null; comments = value ? Object.fromEntries(Object.entries(value).map(([key, items]) => [key, Object.entries(items).map(([id, item]) => ({ ...item, id })).sort((a, b) => a.createdAt - b.createdAt)])) : {}; emit(); }),
+  ];
+  return () => stops.forEach((stop) => stop());
 }
 
-export async function saveBarRanking(user: SignedInUser, ranking: Pick<BarRanking, 'barId' | 'barName' | 'neighborhood' | 'score'>) {
+export async function saveBarRanking(user: SignedInUser, ranking: Pick<BarRanking, 'barId' | 'barName' | 'neighborhood' | 'choice'>) {
   const current = services(); if (!current) throw new Error('Firebase is unavailable.');
   await set(ref(current.db, `barRankings/${ranking.barId}/${user.uid}`), {
     ...ranking,
@@ -79,4 +89,21 @@ export async function saveBarRanking(user: SignedInUser, ranking: Pick<BarRankin
     displayName: user.displayName || user.email?.split('@')[0] || 'Chicago user',
     updatedAt: Date.now(),
   });
+}
+
+export async function updateBarPostText(user: SignedInUser, barId: string, choice: 'like' | 'pass', postText: string) {
+  const current = services(); if (!current) throw new Error('Firebase is unavailable.');
+  await update(ref(current.db, `barRankings/${barId}/${user.uid}`), { choice, postText: postText.trim(), updatedAt: Date.now() });
+}
+
+export async function setBarReaction(user: SignedInUser, postKey: string, type: 'like' | 'dislike' | null) {
+  const current = services(); if (!current) throw new Error('Firebase is unavailable.');
+  const target = ref(current.db, `barPostReactions/${postKey}/${user.uid}`);
+  if (!type) await remove(target);
+  else await set(target, { uid: user.uid, displayName: user.displayName || user.email?.split('@')[0] || 'Chicago user', type, updatedAt: Date.now() });
+}
+
+export async function addBarComment(user: SignedInUser, postKey: string, text: string) {
+  const current = services(); if (!current) throw new Error('Firebase is unavailable.');
+  await set(push(ref(current.db, `barPostComments/${postKey}`)), { uid: user.uid, displayName: user.displayName || user.email?.split('@')[0] || 'Chicago user', text: text.trim(), createdAt: Date.now() });
 }

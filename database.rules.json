@@ -11,7 +11,25 @@
       "$barId": {
         "$uid": {
           ".write": "auth != null && auth.uid === $uid",
-          ".validate": "newData.hasChildren(['uid', 'displayName', 'barId', 'barName', 'neighborhood', 'score', 'updatedAt']) && newData.child('uid').val() === auth.uid && newData.child('score').isNumber() && newData.child('score').val() >= 1 && newData.child('score').val() <= 5"
+          ".validate": "newData.hasChildren(['uid', 'displayName', 'barId', 'barName', 'neighborhood', 'choice', 'updatedAt']) && newData.child('uid').val() === auth.uid && (newData.child('choice').val() === 'like' || newData.child('choice').val() === 'pass') && (!newData.child('postText').exists() || (newData.child('postText').isString() && newData.child('postText').val().length <= 500))"
+        }
+      }
+    },
+    "barPostReactions": {
+      ".read": "auth != null",
+      "$postKey": {
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "!newData.exists() || (newData.child('uid').val() === auth.uid && (newData.child('type').val() === 'like' || newData.child('type').val() === 'dislike'))"
+        }
+      }
+    },
+    "barPostComments": {
+      ".read": "auth != null",
+      "$postKey": {
+        "$commentId": {
+          ".write": "auth != null && !data.exists() && newData.child('uid').val() === auth.uid",
+          ".validate": "newData.hasChildren(['uid', 'displayName', 'text', 'createdAt']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 500"
         }
       }
     }
