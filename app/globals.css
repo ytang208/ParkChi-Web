@@ -24,6 +24,7 @@ button { color:inherit; }
 .topbar h1 { margin:0;font:800 clamp(28px,3vw,42px)/1.05 var(--font-display),sans-serif;letter-spacing:-.045em; }
 .primary,.secondary,.danger,.text-button { border:0;border-radius:12px;min-height:48px;padding:0 19px;font-weight:750;display:inline-flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;text-decoration:none;transition:transform .15s,box-shadow .15s,background .15s; }
 .primary { background:var(--green);color:white;box-shadow:0 8px 20px #08775f2e; }.primary:hover{background:#05664f;transform:translateY(-1px)}.primary.compact{min-height:44px}.primary.full{width:100%}
+.primary:disabled,.location-button:disabled { opacity:.65;cursor:wait;transform:none; }
 .secondary { background:#edf3ef;color:var(--deep); }.danger{background:#fff0eb;color:#b63e18}.text-button{padding:0;background:transparent;color:var(--green);min-height:35px}
 .parking-layout { display:grid;grid-template-columns:minmax(0,1.55fr) minmax(320px,.75fr);gap:22px;min-height:630px; }
 .map-card,.spot-panel,.intro-card,.items-card { border:1px solid #d7e0da;background:var(--paper);border-radius:24px;box-shadow:0 18px 60px #16352f0d;overflow:hidden; }
