@@ -16,6 +16,15 @@ type ParkChiDocument = Document & { modelContext?: { registerTool: (tool: { name
 const STORAGE_KEY = 'parkchi.web.v1';
 const STORAGE_OWNER_KEY = 'parkchi.web.owner.v1';
 const emptySnapshot: Snapshot = { spot: null, street: [], renewals: [] };
+const normalizeSnapshot = (value: unknown): Snapshot => {
+  if (!value || typeof value !== 'object') return emptySnapshot;
+  const saved = value as Partial<Snapshot>;
+  return {
+    spot: saved.spot && typeof saved.spot === 'object' ? saved.spot : null,
+    street: Array.isArray(saved.street) ? saved.street : [],
+    renewals: Array.isArray(saved.renewals) ? saved.renewals : [],
+  };
+};
 const uid = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now());
 const formatDate = (value: string, withTime = true) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(withTime ? { hour: 'numeric', minute: '2-digit' } : {}) }).format(new Date(value));
 const toInputDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -141,7 +150,7 @@ function ParkChiApp({ onHome, ...account }: { onHome: () => void } & AccountProp
   const [cloudReady, setCloudReady] = useState(false);
 
   useEffect(() => {
-    try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) setData(JSON.parse(saved)); }
+    try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) setData(normalizeSnapshot(JSON.parse(saved))); }
     catch { localStorage.removeItem(STORAGE_KEY); }
     setReady(true);
   }, []);
@@ -153,7 +162,7 @@ function ParkChiApp({ onHome, ...account }: { onHome: () => void } & AccountProp
       if (!active) return;
       const localOwner = localStorage.getItem(STORAGE_OWNER_KEY);
       if (saved) {
-        setData(saved);
+        setData(normalizeSnapshot(saved));
       } else if (!localOwner || localOwner === 'guest' || localOwner === account.user!.uid) void saveParkChiData(account.user!.uid, data);
       else setData(emptySnapshot);
       localStorage.setItem(STORAGE_OWNER_KEY, account.user!.uid);
@@ -230,7 +239,7 @@ function ParkChiApp({ onHome, ...account }: { onHome: () => void } & AccountProp
   );
 }
 
-function NavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) { return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span></button>; }
+function NavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) { return <button type="button" className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span></button>; }
 
 function ParkingView({ spot, onSave, onClear }: { spot: ParkingSpot | null; onSave: () => void; onClear: () => void }) {
   const [showFullMap, setShowFullMap] = useState(false);
