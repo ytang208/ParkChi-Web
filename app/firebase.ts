@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { browserLocalPersistence, getAuth, GoogleAuthProvider, onAuthStateChanged, setPersistence, signInWithPopup, signOut, type User } from 'firebase/auth';
-import { doc, getDoc, getFirestore, serverTimestamp, setDoc } from 'firebase/firestore';
+import { get, getDatabase, ref, serverTimestamp, set, update } from 'firebase/database';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
 const firebaseConfig = {
@@ -10,6 +10,7 @@ const firebaseConfig = {
   storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   appId: env.VITE_FIREBASE_APP_ID,
+  databaseURL: env.VITE_FIREBASE_DATABASE_URL,
 };
 
 export const firebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.authDomain && firebaseConfig.projectId && firebaseConfig.appId);
@@ -17,7 +18,7 @@ export const firebaseConfigured = Boolean(firebaseConfig.apiKey && firebaseConfi
 function services() {
   if (!firebaseConfigured) return null;
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  return { auth: getAuth(app), db: getFirestore(app) };
+  return { auth: getAuth(app), db: getDatabase(app) };
 }
 
 export type SignedInUser = Pick<User, 'uid' | 'displayName' | 'email' | 'photoURL'>;
@@ -35,12 +36,12 @@ export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   const result = await signInWithPopup(current.auth, provider);
-  await setDoc(doc(current.db, 'users', result.user.uid), {
+  await update(ref(current.db, `users/${result.user.uid}/profile`), {
     displayName: result.user.displayName ?? null,
     email: result.user.email ?? null,
     provider: 'google.com',
     lastSignInAt: serverTimestamp(),
-  }, { merge: true });
+  });
   return result.user;
 }
 
@@ -51,11 +52,11 @@ export async function signOutUser() {
 
 export async function loadParkChiData<T>(uid: string) {
   const current = services(); if (!current) return null;
-  const snapshot = await getDoc(doc(current.db, 'users', uid, 'apps', 'parkchi'));
-  return snapshot.exists() ? snapshot.data().data as T : null;
+  const snapshot = await get(ref(current.db, `users/${uid}/apps/parkchi/data`));
+  return snapshot.exists() ? snapshot.val() as T : null;
 }
 
 export async function saveParkChiData(uid: string, data: unknown) {
   const current = services(); if (!current) return;
-  await setDoc(doc(current.db, 'users', uid, 'apps', 'parkchi'), { data, updatedAt: serverTimestamp() }, { merge: true });
+  await set(ref(current.db, `users/${uid}/apps/parkchi`), { data, updatedAt: serverTimestamp() });
 }
