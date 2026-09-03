@@ -1,7 +1,8 @@
 'use client';
 
-import { BatteryFull, Bell, CalendarClock, CalendarDays, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, Compass, Grid3X3, ListTodo, LocateFixed, MapPin, Navigation, Plus, Repeat2, Search, Share2, Signpost, Sparkles, Tag, Trash2, WalletCards, Wifi, X } from 'lucide-react';
+import { BatteryFull, Bell, CalendarClock, CalendarDays, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, Cloud, Compass, Grid3X3, ListTodo, LocateFixed, LogOut, MapPin, Navigation, Plus, Repeat2, Search, Share2, Signpost, Sparkles, Tag, Trash2, UserRound, WalletCards, Wifi, X } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { firebaseConfigured, loadParkChiData, observeUser, saveParkChiData, signInWithApple, signOutUser, type SignedInUser } from './firebase';
 
 type Tab = 'parked' | 'street' | 'renewals';
 type ParkingSpot = { note: string; savedAt: string; moveBy?: string; latitude?: number; longitude?: number; photo?: string };
@@ -12,7 +13,13 @@ type LauncherApp = { name: string; detail: string; icon: React.ReactNode; tone: 
 type ParkChiDocument = Document & { modelContext?: { registerTool: (tool: { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: unknown) => unknown }, options?: { signal?: AbortSignal }) => void | Promise<void> } };
 
 const STORAGE_KEY = 'parkchi.web.v1';
+const STORAGE_OWNER_KEY = 'parkchi.web.owner.v1';
 const emptySnapshot: Snapshot = { spot: null, street: [], renewals: [] };
+const withoutPhoto = (snapshot: Snapshot): Snapshot => {
+  if (!snapshot.spot) return snapshot;
+  const { photo: _photo, ...spot } = snapshot.spot;
+  return { ...snapshot, spot };
+};
 const uid = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now());
 const formatDate = (value: string, withTime = true) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(withTime ? { hour: 'numeric', minute: '2-digit' } : {}) }).format(new Date(value));
 const toInputDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -49,10 +56,26 @@ async function createParkingShareCard(spot: ParkingSpot) {
 
 export default function Home() {
   const [screen, setScreen] = useState<'home' | 'parkchi'>('home');
-  return screen === 'home' ? <AppLauncher onOpenParkChi={() => setScreen('parkchi')} /> : <ParkChiApp onHome={() => setScreen('home')} />;
+  const [user, setUser] = useState<SignedInUser | null>(null); const [authReady, setAuthReady] = useState(false); const [authNotice, setAuthNotice] = useState('');
+  useEffect(() => observeUser((nextUser) => { setUser(nextUser); setAuthReady(true); }), []);
+  async function handleSignIn() {
+    setAuthNotice('');
+    try { await signInWithApple(); }
+    catch (error) { setAuthNotice(error instanceof Error ? error.message : 'Could not sign in with Apple.'); }
+  }
+  async function handleSignOut() { await signOutUser(); setAuthNotice('Signed out. Your local copy stays on this device.'); }
+  const account = { user, authReady, authNotice, onSignIn: handleSignIn, onSignOut: handleSignOut };
+  return screen === 'home' ? <AppLauncher onOpenParkChi={() => setScreen('parkchi')} {...account} /> : <ParkChiApp onHome={() => setScreen('home')} {...account} />;
 }
 
-function AppLauncher({ onOpenParkChi }: { onOpenParkChi: () => void }) {
+type AccountProps = { user: SignedInUser | null; authReady: boolean; authNotice: string; onSignIn: () => void; onSignOut: () => void };
+
+function AccountControl({ user, authReady, onSignIn, onSignOut }: AccountProps) {
+  if (!authReady) return <span className="account-loading">Checking account…</span>;
+  return user ? <div className="account-menu"><span className="account-avatar">{(user.displayName || user.email || 'A').slice(0, 1).toUpperCase()}</span><span><strong>{user.displayName || 'Apple user'}</strong><small>Synced with Firebase</small></span><button onClick={onSignOut} aria-label="Sign out"><LogOut size={17} /></button></div> : <button className="apple-signin" onClick={onSignIn} disabled={!firebaseConfigured}><span className="apple-logo">●</span> Sign in with Apple</button>;
+}
+
+function AppLauncher({ onOpenParkChi, ...account }: { onOpenParkChi: () => void } & AccountProps) {
   const [query, setQuery] = useState(''); const [notice, setNotice] = useState('');
   const now = new Date(); const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const apps: LauncherApp[] = [
@@ -69,7 +92,9 @@ function AppLauncher({ onOpenParkChi }: { onOpenParkChi: () => void }) {
     <div className="wallpaper-orb orb-one" /><div className="wallpaper-orb orb-two" />
     <header className="launcher-status"><strong>{now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</strong><span>My Apps</span><div><Wifi size={18} /><BatteryFull size={21} /></div></header>
     <section className="launcher-content">
-      <div className="launcher-heading"><p>{greeting}</p><h1>What would you like to do?</h1></div>
+      <div className="launcher-heading-row"><div className="launcher-heading"><p>{greeting}{account.user ? `, ${account.user.displayName?.split(' ')[0] || 'friend'}` : ''}</p><h1>What would you like to do?</h1></div><AccountControl {...account} /></div>
+      {account.authNotice && <p className="auth-notice" role="status">{account.authNotice}</p>}
+      {!firebaseConfigured && <p className="auth-setup-note"><Cloud size={16} /> Apple sign-in will appear after Firebase is connected.</p>}
       <div className="launcher-widgets">
         <article className="city-widget"><div><span>CHICAGO</span><h2>Your city, simplified.</h2><p>Useful tools for everyday life, all in one place.</p></div><span className="city-star"><Sparkles size={26} /></span></article>
         <article className="date-widget"><span>{now.toLocaleDateString('en-US', { weekday: 'long' })}</span><strong>{now.getDate()}</strong><p>{now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p></article>
@@ -82,12 +107,13 @@ function AppLauncher({ onOpenParkChi }: { onOpenParkChi: () => void }) {
   </main>;
 }
 
-function ParkChiApp({ onHome }: { onHome: () => void }) {
+function ParkChiApp({ onHome, ...account }: { onHome: () => void } & AccountProps) {
   const [tab, setTab] = useState<Tab>('parked');
   const [data, setData] = useState<Snapshot>(emptySnapshot);
   const [ready, setReady] = useState(false);
   const [modal, setModal] = useState<'spot' | 'street' | 'renewal' | null>(null);
   const [toast, setToast] = useState('');
+  const [cloudReady, setCloudReady] = useState(false);
 
   useEffect(() => {
     try { const saved = localStorage.getItem(STORAGE_KEY); if (saved) setData(JSON.parse(saved)); }
@@ -95,6 +121,27 @@ function ParkChiApp({ onHome }: { onHome: () => void }) {
     setReady(true);
   }, []);
   useEffect(() => { if (ready) localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, ready]);
+  useEffect(() => {
+    if (!ready || !account.user) { setCloudReady(false); return; }
+    let active = true;
+    void loadParkChiData<Snapshot>(account.user.uid).then((saved) => {
+      if (!active) return;
+      const localOwner = localStorage.getItem(STORAGE_OWNER_KEY);
+      if (saved) {
+        const localPhoto = data.spot?.savedAt === saved.spot?.savedAt ? data.spot?.photo : undefined;
+        setData({ ...saved, spot: saved.spot ? { ...saved.spot, photo: localPhoto } : null });
+      } else if (!localOwner || localOwner === 'guest' || localOwner === account.user!.uid) void saveParkChiData(account.user!.uid, withoutPhoto(data));
+      else setData(emptySnapshot);
+      localStorage.setItem(STORAGE_OWNER_KEY, account.user!.uid);
+      setCloudReady(true);
+    }).catch(() => notify('Cloud sync is temporarily unavailable.'));
+    return () => { active = false; };
+  }, [ready, account.user?.uid]);
+  useEffect(() => {
+    if (!ready || !cloudReady || !account.user) return;
+    const timer = window.setTimeout(() => { void saveParkChiData(account.user!.uid, withoutPhoto(data)).catch(() => notify('Cloud sync is temporarily unavailable.')); }, 450);
+    return () => window.clearTimeout(timer);
+  }, [data, ready, cloudReady, account.user?.uid]);
   useEffect(() => {
     const context = (document as ParkChiDocument).modelContext;
     if (!context?.registerTool) return;
@@ -124,6 +171,7 @@ function ParkChiApp({ onHome }: { onHome: () => void }) {
       <aside className="side-rail">
         <a className="brand" href="#top" aria-label="ParkChi home"><span className="brand-mark"><CircleParking size={25} strokeWidth={2.4} /></span><span>ParkChi</span></a>
         <button className="rail-home" onClick={onHome}><Grid3X3 size={18} /> All apps</button>
+        <div className="rail-account"><AccountControl {...account} />{account.authNotice && <small>{account.authNotice}</small>}</div>
         <nav className="nav-stack" aria-label="Main navigation">
           <NavButton active={tab === 'parked'} icon={<CarFront />} label="Parked car" onClick={() => setTab('parked')} />
           <NavButton active={tab === 'street'} icon={<Signpost />} label="Street reminders" onClick={() => setTab('street')} />
