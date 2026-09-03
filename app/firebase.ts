@@ -1,6 +1,6 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import { browserLocalPersistence, getAuth, GoogleAuthProvider, onAuthStateChanged, setPersistence, signInWithPopup, signOut, type User } from 'firebase/auth';
-import { get, getDatabase, ref, serverTimestamp, set, update } from 'firebase/database';
+import { get, getDatabase, onValue, ref, serverTimestamp, set, update } from 'firebase/database';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
 const firebaseConfig = {
@@ -22,6 +22,7 @@ function services() {
 }
 
 export type SignedInUser = Pick<User, 'uid' | 'displayName' | 'email' | 'photoURL'>;
+export type BarRanking = { uid: string; displayName: string; barId: string; barName: string; neighborhood: string; score: number; updatedAt: number };
 
 export function observeUser(callback: (user: User | null) => void) {
   const current = services();
@@ -60,4 +61,22 @@ export async function saveParkChiData(uid: string, data: unknown) {
   const current = services(); if (!current) return;
   const firebaseSafeData = JSON.parse(JSON.stringify(data));
   await set(ref(current.db, `users/${uid}/apps/parkchi`), { data: firebaseSafeData, schemaVersion: 2, updatedAt: serverTimestamp() });
+}
+
+export function observeBarRankings(callback: (rankings: BarRanking[]) => void) {
+  const current = services(); if (!current) { callback([]); return () => undefined; }
+  return onValue(ref(current.db, 'barRankings'), (snapshot) => {
+    const value = snapshot.val() as Record<string, Record<string, BarRanking>> | null;
+    callback(value ? Object.values(value).flatMap((ratings) => Object.values(ratings)) : []);
+  });
+}
+
+export async function saveBarRanking(user: SignedInUser, ranking: Pick<BarRanking, 'barId' | 'barName' | 'neighborhood' | 'score'>) {
+  const current = services(); if (!current) throw new Error('Firebase is unavailable.');
+  await set(ref(current.db, `barRankings/${ranking.barId}/${user.uid}`), {
+    ...ranking,
+    uid: user.uid,
+    displayName: user.displayName || user.email?.split('@')[0] || 'Chicago user',
+    updatedAt: Date.now(),
+  });
 }

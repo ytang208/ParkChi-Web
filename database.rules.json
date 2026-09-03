@@ -5,6 +5,15 @@
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"
       }
+    },
+    "barRankings": {
+      ".read": "auth != null",
+      "$barId": {
+        "$uid": {
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.hasChildren(['uid', 'displayName', 'barId', 'barName', 'neighborhood', 'score', 'updatedAt']) && newData.child('uid').val() === auth.uid && newData.child('score').isNumber() && newData.child('score').val() >= 1 && newData.child('score').val() <= 5"
+        }
+      }
     }
   }
 }

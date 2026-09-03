@@ -1,7 +1,8 @@
 'use client';
 
-import { BatteryFull, Bell, CalendarClock, CalendarDays, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, Cloud, Compass, Grid3X3, ListTodo, LocateFixed, LogOut, MapPin, Navigation, Plus, Repeat2, Search, Share2, Signpost, Sparkles, Tag, Trash2, UserRound, WalletCards, Wifi, X } from 'lucide-react';
+import { BatteryFull, Bell, CalendarClock, CalendarDays, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, Cloud, Compass, Grid3X3, ListTodo, LocateFixed, LogOut, MapPin, Navigation, Plus, Repeat2, Search, Share2, Signpost, Sparkles, Tag, Trash2, UserRound, WalletCards, Wifi, Wine, X } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
+import BarSwipeApp from './BarSwipeApp';
 import { firebaseConfigured, loadParkChiData, observeUser, saveParkChiData, signInWithGoogle, signOutUser, type SignedInUser } from './firebase';
 
 type Tab = 'parked' | 'street' | 'renewals';
@@ -76,7 +77,7 @@ async function prepareParkingPhoto(file: File) {
 }
 
 export default function Home() {
-  const [screen, setScreen] = useState<'home' | 'parkchi'>('home');
+  const [screen, setScreen] = useState<'home' | 'parkchi' | 'bars'>('home');
   const [user, setUser] = useState<SignedInUser | null>(null); const [authReady, setAuthReady] = useState(false); const [authNotice, setAuthNotice] = useState('');
   useEffect(() => observeUser((nextUser) => { setUser(nextUser); setAuthReady(true); }), []);
   async function handleSignIn() {
@@ -86,7 +87,9 @@ export default function Home() {
   }
   async function handleSignOut() { await signOutUser(); setAuthNotice('Signed out. Your local copy stays on this device.'); }
   const account = { user, authReady, authNotice, onSignIn: handleSignIn, onSignOut: handleSignOut };
-  return screen === 'home' ? <AppLauncher onOpenParkChi={() => setScreen('parkchi')} {...account} /> : <ParkChiApp onHome={() => setScreen('home')} {...account} />;
+  if (screen === 'parkchi') return <ParkChiApp onHome={() => setScreen('home')} {...account} />;
+  if (screen === 'bars') return <BarSwipeApp user={user} onHome={() => setScreen('home')} onSignIn={handleSignIn} />;
+  return <AppLauncher onOpenParkChi={() => setScreen('parkchi')} onOpenBars={() => setScreen('bars')} {...account} />;
 }
 
 type AccountProps = { user: SignedInUser | null; authReady: boolean; authNotice: string; onSignIn: () => void; onSignOut: () => void };
@@ -96,11 +99,12 @@ function AccountControl({ user, authReady, onSignIn, onSignOut }: AccountProps) 
   return user ? <div className="account-menu"><span className="account-avatar">{(user.displayName || user.email || 'G').slice(0, 1).toUpperCase()}</span><span><strong>{user.displayName || 'Google user'}</strong><small>Synced with Firebase</small></span><button onClick={onSignOut} aria-label="Sign out"><LogOut size={17} /></button></div> : <button className="google-signin" onClick={onSignIn} disabled={!firebaseConfigured}><span className="google-logo">G</span> Sign in with Google</button>;
 }
 
-function AppLauncher({ onOpenParkChi, ...account }: { onOpenParkChi: () => void } & AccountProps) {
+function AppLauncher({ onOpenParkChi, onOpenBars, ...account }: { onOpenParkChi: () => void; onOpenBars: () => void } & AccountProps) {
   const [query, setQuery] = useState(''); const [notice, setNotice] = useState('');
   const now = new Date(); const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const apps: LauncherApp[] = [
     { name: 'ParkChi', detail: 'Parking companion', icon: <CircleParking />, tone: 'parkchi', ready: true, action: onOpenParkChi },
+    { name: 'BarSwipe', detail: 'Rank North Side bars', icon: <Wine />, tone: 'barswipe', ready: true, action: onOpenBars },
     { name: 'Chicago Events', detail: 'Find something fun', icon: <Compass />, tone: 'events', ready: false },
     { name: 'Budget', detail: 'Track your spending', icon: <WalletCards />, tone: 'budget', ready: false },
     { name: 'Tomorrow', detail: 'Plan your next day', icon: <ListTodo />, tone: 'tomorrow', ready: false },
@@ -121,7 +125,7 @@ function AppLauncher({ onOpenParkChi, ...account }: { onOpenParkChi: () => void 
         <article className="date-widget"><span>{now.toLocaleDateString('en-US', { weekday: 'long' })}</span><strong>{now.getDate()}</strong><p>{now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p></article>
       </div>
       <label className="app-search"><Search size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search apps" /></label>
-      <section className="apps-section" aria-labelledby="apps-title"><div className="section-title"><h2 id="apps-title">Apps</h2><span>{apps.filter((app) => app.ready).length} available</span></div><div className="app-grid">{visibleApps.map((app) => <button className="app-tile" key={app.name} onClick={() => openApp(app)}><span className={`app-icon ${app.tone}`}>{app.icon}</span><span className="app-name">{app.name}</span><small>{app.detail}</small><em>{app.ready ? 'Open' : 'Coming soon'}</em></button>)}</div>{visibleApps.length === 0 && <div className="no-apps">No apps match “{query}”.</div>}</section>
+      <section className="apps-section" aria-labelledby="apps-title"><div className="section-title"><h2 id="apps-title">Apps</h2><span>{apps.filter((app) => app.ready).length} available</span></div><div className="app-grid">{visibleApps.map((app) => <button className="app-tile" key={app.name} onClick={() => openApp(app)}><span className={`app-icon ${app.tone}`}>{app.icon}</span><span className="app-name">{app.name}</span><small>{app.detail}</small><em className={app.ready ? 'ready' : ''}>{app.ready ? 'Open' : 'Coming soon'}</em></button>)}</div>{visibleApps.length === 0 && <div className="no-apps">No apps match “{query}”.</div>}</section>
     </section>
     <div className="launcher-dock"><button onClick={onOpenParkChi}><span className="dock-icon parkchi"><CircleParking /></span><small>ParkChi</small></button><span className="dock-divider" /><div><Grid3X3 size={20} /><span>More apps are on the way</span></div></div>
     {notice && <div className="launcher-notice" role="status">{notice}</div>}
