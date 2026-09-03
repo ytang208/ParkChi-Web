@@ -1,5 +1,5 @@
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { browserLocalPersistence, getAuth, OAuthProvider, onAuthStateChanged, setPersistence, signInWithPopup, signOut, type User } from 'firebase/auth';
+import { browserLocalPersistence, getAuth, GoogleAuthProvider, onAuthStateChanged, setPersistence, signInWithPopup, signOut, type User } from 'firebase/auth';
 import { doc, getDoc, getFirestore, serverTimestamp, setDoc } from 'firebase/firestore';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
@@ -29,16 +29,16 @@ export function observeUser(callback: (user: User | null) => void) {
   return onAuthStateChanged(current.auth, callback);
 }
 
-export async function signInWithApple() {
+export async function signInWithGoogle() {
   const current = services();
   if (!current) throw new Error('Firebase has not been connected yet.');
-  const provider = new OAuthProvider('apple.com');
-  provider.addScope('email'); provider.addScope('name');
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
   const result = await signInWithPopup(current.auth, provider);
   await setDoc(doc(current.db, 'users', result.user.uid), {
     displayName: result.user.displayName ?? null,
     email: result.user.email ?? null,
-    provider: 'apple.com',
+    provider: 'google.com',
     lastSignInAt: serverTimestamp(),
   }, { merge: true });
   return result.user;
