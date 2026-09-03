@@ -93,19 +93,20 @@ export default function Home() {
 function NavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) { return <button className={`nav-button ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span></button>; }
 
 function ParkingView({ spot, onSave, onClear }: { spot: ParkingSpot | null; onSave: () => void; onClear: () => void }) {
+  const [showFullMap, setShowFullMap] = useState(false);
   const latitude = spot?.latitude ?? 41.8781;
   const longitude = spot?.longitude ?? -87.6298;
   const mapDelta = spot?.latitude ? 0.012 : 0.075;
   const mapEmbed = `https://www.openstreetmap.org/export/embed.html?bbox=${longitude - mapDelta}%2C${latitude - mapDelta * 0.62}%2C${longitude + mapDelta}%2C${latitude + mapDelta * 0.62}&layer=mapnik&marker=${latitude}%2C${longitude}`;
-  const fullMap = `https://www.openstreetmap.org/${spot?.latitude ? `?mlat=${latitude}&mlon=${longitude}#map=17/${latitude}/${longitude}` : `#map=12/${latitude}/${longitude}`}`;
   const directions = spot?.latitude && spot?.longitude ? `https://www.google.com/maps/dir/?api=1&destination=${spot.latitude},${spot.longitude}` : spot?.note ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spot.note)}` : '#';
   return <div className="parking-layout">
     <section className="map-card" aria-label="Interactive Chicago parking map">
       <iframe className="live-map" title="Interactive Chicago parking map" src={mapEmbed} loading="eager" referrerPolicy="strict-origin-when-cross-origin" />
       <div className="map-pill"><MapPin size={16} fill="currentColor" /> {spot?.latitude ? 'Your parked car' : 'Chicago parking pin'}</div>
-      <a className="open-map" href={fullMap} target="_blank" rel="noreferrer"><Navigation size={17} /> Open full map</a>
+      <button className="open-map" onClick={() => setShowFullMap(true)}><Navigation size={17} /> Open full map</button>
     </section>
     <aside className="spot-panel">{spot ? <><div className="status-line"><span className="check-badge"><Check size={17} /></span><div><p className="kicker">Car saved</p><p className="muted">{formatDate(spot.savedAt)}</p></div></div><h2>{spot.note || 'Saved parking location'}</h2>{spot.moveBy && <div className="alert-card"><Clock3 size={21} /><div><strong>Move your car by</strong><span>{formatDate(spot.moveBy)}</span></div></div>}{spot.photo && <img className="sign-photo" src={spot.photo} alt="Saved parking sign" />}<a className="primary full" href={directions} target="_blank" rel="noreferrer"><Navigation size={19} /> Get directions</a><div className="split-actions"><button className="secondary" onClick={onSave}>Edit details</button><button className="danger" onClick={onClear}><Trash2 size={17} /> Clear</button></div></> : <><div className="empty-icon"><CarFront size={31} /></div><p className="kicker">Ready when you are</p><h2>Never lose your parking spot again.</h2><p className="muted body-copy">Save your location, add a note about the block, and set a reminder before the meter or restriction begins.</p><button className="primary full" onClick={onSave}><MapPin size={19} /> Save my parking spot</button></>}<p className="safety"><Bell size={15} /> Always check posted parking signs.</p></aside>
+    {showFullMap && <div className="full-map-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setShowFullMap(false)}><section className="full-map-dialog" role="dialog" aria-modal="true" aria-labelledby="full-map-title"><header><div><p className="eyebrow">ParkChi map</p><h2 id="full-map-title">{spot?.latitude ? 'Your parked car' : 'Chicago'}</h2></div><button className="close-button" onClick={() => setShowFullMap(false)} aria-label="Close full map"><X size={21} /></button></header><div className="full-map-canvas"><iframe title="Full interactive Chicago parking map" src={mapEmbed} loading="eager" referrerPolicy="strict-origin-when-cross-origin" /></div></section></div>}
   </div>;
 }
 
