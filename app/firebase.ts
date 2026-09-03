@@ -58,5 +58,6 @@ export async function loadParkChiData<T>(uid: string) {
 
 export async function saveParkChiData(uid: string, data: unknown) {
   const current = services(); if (!current) return;
-  await set(ref(current.db, `users/${uid}/apps/parkchi`), { data, updatedAt: serverTimestamp() });
+  const firebaseSafeData = JSON.parse(JSON.stringify(data));
+  await set(ref(current.db, `users/${uid}/apps/parkchi`), { data: firebaseSafeData, schemaVersion: 2, updatedAt: serverTimestamp() });
 }

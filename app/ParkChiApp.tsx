@@ -15,11 +15,6 @@ type ParkChiDocument = Document & { modelContext?: { registerTool: (tool: { name
 const STORAGE_KEY = 'parkchi.web.v1';
 const STORAGE_OWNER_KEY = 'parkchi.web.owner.v1';
 const emptySnapshot: Snapshot = { spot: null, street: [], renewals: [] };
-const withoutPhoto = (snapshot: Snapshot): Snapshot => {
-  if (!snapshot.spot) return snapshot;
-  const { photo: _photo, ...spot } = snapshot.spot;
-  return { ...snapshot, spot };
-};
 const uid = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now());
 const formatDate = (value: string, withTime = true) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(withTime ? { hour: 'numeric', minute: '2-digit' } : {}) }).format(new Date(value));
 const toInputDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
@@ -52,6 +47,32 @@ async function createParkingShareCard(spot: ParkingSpot) {
   context.fillStyle = '#ffffff'; context.font = '650 24px system-ui'; context.fillText('Open the location from the shared message', 72, 574);
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Could not create image.')), 'image/png'));
   return new File([blob], 'parkchi-parked-location.png', { type: 'image/png' });
+}
+
+async function prepareParkingPhoto(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('That photo could not be opened. Please choose another image.'));
+      element.src = objectUrl;
+    });
+    const maxDimension = 1280;
+    const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Photo processing is unavailable in this browser.');
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    let result = canvas.toDataURL('image/jpeg', 0.78);
+    if (result.length > 2_500_000) result = canvas.toDataURL('image/jpeg', 0.58);
+    if (result.length > 3_500_000) throw new Error('This photo is too large to sync. Please choose a smaller image.');
+    return result;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 export default function Home() {
@@ -128,9 +149,8 @@ function ParkChiApp({ onHome, ...account }: { onHome: () => void } & AccountProp
       if (!active) return;
       const localOwner = localStorage.getItem(STORAGE_OWNER_KEY);
       if (saved) {
-        const localPhoto = data.spot?.savedAt === saved.spot?.savedAt ? data.spot?.photo : undefined;
-        setData({ ...saved, spot: saved.spot ? { ...saved.spot, photo: localPhoto } : null });
-      } else if (!localOwner || localOwner === 'guest' || localOwner === account.user!.uid) void saveParkChiData(account.user!.uid, withoutPhoto(data));
+        setData(saved);
+      } else if (!localOwner || localOwner === 'guest' || localOwner === account.user!.uid) void saveParkChiData(account.user!.uid, data);
       else setData(emptySnapshot);
       localStorage.setItem(STORAGE_OWNER_KEY, account.user!.uid);
       setCloudReady(true);
@@ -139,7 +159,7 @@ function ParkChiApp({ onHome, ...account }: { onHome: () => void } & AccountProp
   }, [ready, account.user?.uid]);
   useEffect(() => {
     if (!ready || !cloudReady || !account.user) return;
-    const timer = window.setTimeout(() => { void saveParkChiData(account.user!.uid, withoutPhoto(data)).catch(() => notify('Cloud sync is temporarily unavailable.')); }, 450);
+    const timer = window.setTimeout(() => { void saveParkChiData(account.user!.uid, data).catch(() => notify('Cloud sync is temporarily unavailable.')); }, 450);
     return () => window.clearTimeout(timer);
   }, [data, ready, cloudReady, account.user?.uid]);
   useEffect(() => {
@@ -177,7 +197,7 @@ function ParkChiApp({ onHome, ...account }: { onHome: () => void } & AccountProp
           <NavButton active={tab === 'street'} icon={<Signpost />} label="Street reminders" onClick={() => setTab('street')} />
           <NavButton active={tab === 'renewals'} icon={<CalendarClock />} label="Renewals" onClick={() => setTab('renewals')} />
         </nav>
-        <div className="rail-note"><Sparkles size={18} /><p><strong>Made for Chicago</strong><br />Your parking details stay in this browser.</p></div>
+        <div className="rail-note"><Sparkles size={18} /><p><strong>Made for Chicago</strong><br />{account.user ? 'Your parking details sync securely to your account.' : 'Sign in to sync your parking details across devices.'}</p></div>
       </aside>
 
       <section className="workspace" id="top">
@@ -190,7 +210,7 @@ function ParkChiApp({ onHome, ...account }: { onHome: () => void } & AccountProp
         </header>
         {tab === 'parked' && <ParkingView spot={data.spot} onSave={() => setModal('spot')} onClear={() => { setData({ ...data, spot: null }); notify('Parking spot cleared'); }} />}
         {tab === 'street' && <StreetView items={data.street} onAdd={() => setModal('street')} onDelete={(id) => setData({ ...data, street: data.street.filter((item) => item.id !== id) })} />}
-        {tab === 'renewals' && <RenewalsView items={data.renewals} onAdd={() => setModal('renewal')} onDelete={(id) => setData({ ...data, renewals: data.renewals.filter((item) => item.id !== id) })} />}
+        {tab === 'renewals' && <RenewalsView items={data.renewals} synced={Boolean(account.user)} onAdd={() => setModal('renewal')} onDelete={(id) => setData({ ...data, renewals: data.renewals.filter((item) => item.id !== id) })} />}
       </section>
 
       <nav className="mobile-tabs" aria-label="Main navigation">
@@ -248,7 +268,7 @@ function ParkingView({ spot, onSave, onClear }: { spot: ParkingSpot | null; onSa
 }
 
 function StreetView({ items, onAdd, onDelete }: { items: StreetReminder[]; onAdd: () => void; onDelete: (id: string) => void }) { return <ListSurface icon={<Signpost size={30} />} title="Keep ahead of street cleaning" description="Save dates from signs near your regular parking spots. Schedules can change, so always verify the block before parking." empty={items.length === 0} onAdd={onAdd}>{items.map((item) => <article className="list-row" key={item.id}><DateTile value={item.date} /><div className="list-copy"><h3>{item.title}</h3><p>{formatDate(item.date)}</p>{item.details && <small>{item.details}</small>}</div>{item.repeat && <span className="repeat"><Repeat2 size={16} /> Weekly</span>}<button className="icon-danger" aria-label={`Delete ${item.title}`} onClick={() => onDelete(item.id)}><Trash2 size={17} /></button></article>)}</ListSurface>; }
-function RenewalsView({ items, onAdd, onDelete }: { items: Renewal[]; onAdd: () => void; onDelete: (id: string) => void }) { return <ListSurface icon={<CalendarClock size={30} />} title="Put every deadline in one place" description="Track city stickers, plates, permits, and emissions tests. ParkChi keeps everything on this device." empty={items.length === 0} onAdd={onAdd}>{items.map((item) => <article className="list-row" key={item.id}><DateTile value={item.date} /><div className="list-copy"><h3>{item.kind}</h3><p>Due {formatDate(item.date, false)}</p>{item.note && <small>{item.note}</small>}</div><button className="icon-danger" aria-label={`Delete ${item.kind}`} onClick={() => onDelete(item.id)}><Trash2 size={17} /></button></article>)}</ListSurface>; }
+function RenewalsView({ items, synced, onAdd, onDelete }: { items: Renewal[]; synced: boolean; onAdd: () => void; onDelete: (id: string) => void }) { return <ListSurface icon={<CalendarClock size={30} />} title="Put every deadline in one place" description={`Track city stickers, plates, permits, and emissions tests. ${synced ? 'Everything is synced to your account.' : 'Sign in to sync everything to your account.'}`} empty={items.length === 0} onAdd={onAdd}>{items.map((item) => <article className="list-row" key={item.id}><DateTile value={item.date} /><div className="list-copy"><h3>{item.kind}</h3><p>Due {formatDate(item.date, false)}</p>{item.note && <small>{item.note}</small>}</div><button className="icon-danger" aria-label={`Delete ${item.kind}`} onClick={() => onDelete(item.id)}><Trash2 size={17} /></button></article>)}</ListSurface>; }
 function ListSurface({ icon, title, description, empty, onAdd, children }: { icon: React.ReactNode; title: string; description: string; empty: boolean; onAdd: () => void; children: React.ReactNode }) { return <div className="list-layout"><section className="intro-card"><div className="intro-icon">{icon}</div><p className="eyebrow">Plan ahead</p><h2>{title}</h2><p>{description}</p><button className="primary" onClick={onAdd}><Plus size={18} /> Add reminder</button></section><section className="items-card">{empty ? <div className="empty-state"><CalendarClock size={38} /><h3>Nothing due yet</h3><p>Your saved reminders will appear here in date order.</p><button className="text-button" onClick={onAdd}>Create your first reminder <ChevronRight size={17} /></button></div> : children}</section></div>; }
 function DateTile({ value }: { value: string }) { const date = new Date(value); return <div className="date-tile"><span>{date.toLocaleDateString('en-US', { month: 'short' })}</span><strong>{date.getDate()}</strong></div>; }
 function ModalFrame({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) { return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header><div><p className="eyebrow">ParkChi</p><h2 id="modal-title">{title}</h2><p>{subtitle}</p></div><button className="close-button" onClick={onClose} aria-label="Close"><X size={21} /></button></header>{children}</section></div>; }
@@ -257,6 +277,7 @@ function SpotModal({ existing, onClose, onSave }: { existing: ParkingSpot | null
   const [note, setNote] = useState(existing?.note || ''); const [moveBy, setMoveBy] = useState(existing?.moveBy || '');
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(existing?.latitude && existing?.longitude ? { latitude: existing.latitude, longitude: existing.longitude } : null);
   const [locating, setLocating] = useState(false); const [locationMessage, setLocationMessage] = useState(coords ? 'Location is saved' : 'Add your location for one-tap directions'); const [photo, setPhoto] = useState(existing?.photo || '');
+  const [processingPhoto, setProcessingPhoto] = useState(false); const [photoMessage, setPhotoMessage] = useState('');
   const [showLocationHelp, setShowLocationHelp] = useState(false); const [retryShouldSave, setRetryShouldSave] = useState(false);
   function finishSave(location: { latitude: number; longitude: number }) { onSave({ note: note.trim(), savedAt: new Date().toISOString(), moveBy: moveBy ? new Date(moveBy).toISOString() : undefined, ...location, photo: photo || undefined }); }
   function locate(afterCapture?: (location: { latitude: number; longitude: number }) => void) {
@@ -273,7 +294,7 @@ function SpotModal({ existing, onClose, onSave }: { existing: ParkingSpot | null
   }
   function submit(event: FormEvent) { event.preventDefault(); if (coords) finishSave(coords); else locate(finishSave); }
   return <ModalFrame title={existing ? 'Update parking spot' : 'Save parking spot'} subtitle="Add enough detail to make the walk back effortless." onClose={onClose}>
-    <form onSubmit={submit} className="form-stack"><label>Where did you park?<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="West side of Damen near Waveland" rows={3} autoFocus /></label><button type="button" className={`location-button ${coords ? 'complete' : ''}`} onClick={() => locate()} disabled={locating}><span>{coords ? <Check size={20} /> : <LocateFixed size={20} />}</span><div><strong>{locating ? 'Finding you…' : coords ? 'Location added' : 'Capture where I’m parked'}</strong><small>{locationMessage}</small></div><ChevronRight size={18} /></button><label>Move reminder <span className="optional">optional</span><input type="datetime-local" value={moveBy ? toInputDate(new Date(moveBy)) : ''} min={toInputDate(new Date())} onChange={(e) => setMoveBy(e.target.value)} /></label><label className="photo-picker"><input type="file" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = () => setPhoto(String(reader.result)); reader.readAsDataURL(file); } }} /><Camera size={20} /><span>{photo ? 'Replace sign photo' : 'Add parking sign photo'}</span></label>{photo && <img className="photo-preview" src={photo} alt="Parking sign preview" />}<button className="primary full" type="submit" disabled={locating}><MapPin size={19} /> {locating ? 'Finding your location…' : coords ? 'Save parking spot' : 'Use my location & save'}</button></form>
+    <form onSubmit={submit} className="form-stack"><label>Where did you park?<textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="West side of Damen near Waveland" rows={3} autoFocus /></label><button type="button" className={`location-button ${coords ? 'complete' : ''}`} onClick={() => locate()} disabled={locating}><span>{coords ? <Check size={20} /> : <LocateFixed size={20} />}</span><div><strong>{locating ? 'Finding you…' : coords ? 'Location added' : 'Capture where I’m parked'}</strong><small>{locationMessage}</small></div><ChevronRight size={18} /></button><label>Move reminder <span className="optional">optional</span><input type="datetime-local" value={moveBy ? toInputDate(new Date(moveBy)) : ''} min={toInputDate(new Date())} onChange={(e) => setMoveBy(e.target.value)} /></label><label className="photo-picker"><input type="file" accept="image/*" disabled={processingPhoto} onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; setProcessingPhoto(true); setPhotoMessage('Preparing photo for secure sync…'); try { setPhoto(await prepareParkingPhoto(file)); setPhotoMessage('Photo is ready to sync with your account.'); } catch (error) { setPhotoMessage(error instanceof Error ? error.message : 'Could not prepare that photo.'); } finally { setProcessingPhoto(false); } }} /><Camera size={20} /><span>{processingPhoto ? 'Preparing photo…' : photo ? 'Replace sign photo' : 'Add parking sign photo'}</span></label>{photoMessage && <small role="status">{photoMessage}</small>}{photo && <img className="photo-preview" src={photo} alt="Parking sign preview" />}<button className="primary full" type="submit" disabled={locating || processingPhoto}><MapPin size={19} /> {processingPhoto ? 'Preparing photo…' : locating ? 'Finding your location…' : coords ? 'Save parking spot' : 'Use my location & save'}</button></form>
     {showLocationHelp && <div className="permission-backdrop" role="presentation"><section className="permission-popup" role="alertdialog" aria-modal="true" aria-labelledby="permission-title"><button className="close-button permission-close" onClick={() => setShowLocationHelp(false)} aria-label="Close location help"><X size={20} /></button><div className="permission-icon"><LocateFixed size={29} /></div><p className="eyebrow">Location needed</p><h3 id="permission-title">Please allow location</h3><p>ParkChi needs your current position to put the parking pin in the right place.</p><p className="permission-tip">If the browser prompt does not reappear, open this site’s settings and change <strong>Location</strong> to <strong>Allow</strong>.</p><div className="permission-actions"><button className="primary full" onClick={() => { setShowLocationHelp(false); locate(retryShouldSave ? finishSave : undefined); }}><LocateFixed size={18} /> Request location again</button><button className="text-button" onClick={() => setShowLocationHelp(false)}>Not now</button></div></section></div>}
   </ModalFrame>;
 }
