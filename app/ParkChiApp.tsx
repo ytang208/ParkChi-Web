@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, CalendarClock, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, LocateFixed, MapPin, Navigation, Plus, Repeat2, Signpost, Sparkles, Trash2, X } from 'lucide-react';
+import { Bell, CalendarClock, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, LocateFixed, MapPin, Navigation, Plus, Repeat2, Share2, Signpost, Sparkles, Trash2, X } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 type Tab = 'parked' | 'street' | 'renewals';
@@ -15,6 +15,36 @@ const emptySnapshot: Snapshot = { spot: null, street: [], renewals: [] };
 const uid = () => typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now());
 const formatDate = (value: string, withTime = true) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', ...(withTime ? { hour: 'numeric', minute: '2-digit' } : {}) }).format(new Date(value));
 const toInputDate = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+
+function drawWrappedText(context: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number) {
+  const words = text.split(/\s+/); let line = ''; let lineNumber = 0;
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (context.measureText(candidate).width > maxWidth && line) {
+      context.fillText(line, x, y + lineNumber * lineHeight); line = word; lineNumber += 1;
+      if (lineNumber === maxLines - 1) break;
+    } else line = candidate;
+  }
+  if (lineNumber < maxLines) context.fillText(line, x, y + lineNumber * lineHeight);
+}
+
+async function createParkingShareCard(spot: ParkingSpot) {
+  const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 630;
+  const context = canvas.getContext('2d'); if (!context) throw new Error('Image creation is unavailable.');
+  context.fillStyle = '#063d32'; context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#0a5647'; context.beginPath(); context.arc(1060, 55, 360, 0, Math.PI * 2); context.fill();
+  context.fillStyle = '#f7bd4c'; context.beginPath(); context.arc(94, 86, 46, 0, Math.PI * 2); context.fill();
+  context.fillStyle = '#063d32'; context.font = '800 52px system-ui'; context.textAlign = 'center'; context.fillText('P', 94, 105); context.textAlign = 'left';
+  context.fillStyle = '#d9f3e8'; context.font = '700 30px system-ui'; context.fillText('PARKCHI', 164, 98);
+  context.fillStyle = '#fffefa'; context.font = '800 68px system-ui'; context.fillText('My car is parked here', 70, 228);
+  context.fillStyle = '#d9f3e8'; context.font = '500 38px system-ui'; drawWrappedText(context, spot.note || 'Saved parking location', 72, 310, 850, 52, 2);
+  context.strokeStyle = '#f7bd4c'; context.lineWidth = 12; context.beginPath(); context.arc(1018, 302, 44, 0, Math.PI * 2); context.stroke(); context.beginPath(); context.moveTo(1018, 346); context.lineTo(1018, 452); context.stroke();
+  context.fillStyle = '#f7bd4c'; context.beginPath(); context.arc(1018, 458, 20, 0, Math.PI * 2); context.fill();
+  context.fillStyle = '#a9cfc2'; context.font = '500 25px system-ui'; context.fillText(`Saved ${formatDate(spot.savedAt)}`, 72, 525);
+  context.fillStyle = '#ffffff'; context.font = '650 24px system-ui'; context.fillText('Open the location from the shared message', 72, 574);
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Could not create image.')), 'image/png'));
+  return new File([blob], 'parkchi-parked-location.png', { type: 'image/png' });
+}
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>('parked');
@@ -94,18 +124,39 @@ function NavButton({ active, icon, label, onClick }: { active: boolean; icon: Re
 
 function ParkingView({ spot, onSave, onClear }: { spot: ParkingSpot | null; onSave: () => void; onClear: () => void }) {
   const [showFullMap, setShowFullMap] = useState(false);
+  const [sharing, setSharing] = useState(false); const [shareStatus, setShareStatus] = useState('');
   const latitude = spot?.latitude ?? 41.8781;
   const longitude = spot?.longitude ?? -87.6298;
   const mapDelta = spot?.latitude ? 0.012 : 0.075;
   const mapEmbed = `https://www.openstreetmap.org/export/embed.html?bbox=${longitude - mapDelta}%2C${latitude - mapDelta * 0.62}%2C${longitude + mapDelta}%2C${latitude + mapDelta * 0.62}&layer=mapnik&marker=${latitude}%2C${longitude}`;
   const directions = spot?.latitude && spot?.longitude ? `https://www.google.com/maps/dir/?api=1&destination=${spot.latitude},${spot.longitude}` : spot?.note ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spot.note)}` : '#';
+  async function shareParkingSpot() {
+    if (!spot?.latitude || !spot.longitude) { setShareStatus('Save an exact location before sharing.'); return; }
+    setSharing(true); setShareStatus('');
+    const mapUrl = `https://maps.apple.com/?ll=${spot.latitude},${spot.longitude}&q=${encodeURIComponent(spot.note || 'Parked car')}`;
+    const message = `My car is parked${spot.note ? ` at ${spot.note}` : ' here'}. Open the location: ${mapUrl}`;
+    try {
+      const image = await createParkingShareCard(spot);
+      const fileShare = { title: 'My parked car', text: message, files: [image] };
+      if (navigator.share) {
+        if (!navigator.canShare || navigator.canShare(fileShare)) await navigator.share(fileShare);
+        else await navigator.share({ title: 'My parked car', text: message });
+        setShareStatus('Shared from ParkChi.');
+      } else {
+        await navigator.clipboard.writeText(message); setShareStatus('Location message copied.');
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') setShareStatus('Share canceled.');
+      else { try { await navigator.clipboard.writeText(message); setShareStatus('Location message copied.'); } catch { setShareStatus('Sharing is not available in this browser.'); } }
+    } finally { setSharing(false); }
+  }
   return <div className="parking-layout">
     <section className="map-card" aria-label="Interactive Chicago parking map">
       <iframe className="live-map" title="Interactive Chicago parking map" src={mapEmbed} loading="eager" referrerPolicy="strict-origin-when-cross-origin" />
       <div className="map-pill"><MapPin size={16} fill="currentColor" /> {spot?.latitude ? 'Your parked car' : 'Chicago parking pin'}</div>
       <button className="open-map" onClick={() => setShowFullMap(true)}><Navigation size={17} /> Open full map</button>
     </section>
-    <aside className="spot-panel">{spot ? <><div className="status-line"><span className="check-badge"><Check size={17} /></span><div><p className="kicker">Car saved</p><p className="muted">{formatDate(spot.savedAt)}</p></div></div><h2>{spot.note || 'Saved parking location'}</h2>{spot.moveBy && <div className="alert-card"><Clock3 size={21} /><div><strong>Move your car by</strong><span>{formatDate(spot.moveBy)}</span></div></div>}{spot.photo && <img className="sign-photo" src={spot.photo} alt="Saved parking sign" />}<a className="primary full" href={directions} target="_blank" rel="noreferrer"><Navigation size={19} /> Get directions</a><div className="split-actions"><button className="secondary" onClick={onSave}>Edit details</button><button className="danger" onClick={onClear}><Trash2 size={17} /> Clear</button></div></> : <><div className="empty-icon"><CarFront size={31} /></div><p className="kicker">Ready when you are</p><h2>Never lose your parking spot again.</h2><p className="muted body-copy">Save your location, add a note about the block, and set a reminder before the meter or restriction begins.</p><button className="primary full" onClick={onSave}><MapPin size={19} /> Save my parking spot</button></>}<p className="safety"><Bell size={15} /> Always check posted parking signs.</p></aside>
+    <aside className="spot-panel">{spot ? <><div className="status-line"><span className="check-badge"><Check size={17} /></span><div><p className="kicker">Car saved</p><p className="muted">{formatDate(spot.savedAt)}</p></div></div><h2>{spot.note || 'Saved parking location'}</h2>{spot.moveBy && <div className="alert-card"><Clock3 size={21} /><div><strong>Move your car by</strong><span>{formatDate(spot.moveBy)}</span></div></div>}{spot.photo && <img className="sign-photo" src={spot.photo} alt="Saved parking sign" />}<a className="primary full" href={directions} target="_blank" rel="noreferrer"><Navigation size={19} /> Get directions</a>{spot.latitude && spot.longitude && <button className="secondary full share-button" onClick={shareParkingSpot} disabled={sharing}><Share2 size={18} /> {sharing ? 'Preparing share…' : 'Share parked location'}</button>}{shareStatus && <p className="share-status" role="status">{shareStatus}</p>}<div className="split-actions"><button className="secondary" onClick={onSave}>Edit details</button><button className="danger" onClick={onClear}><Trash2 size={17} /> Clear</button></div></> : <><div className="empty-icon"><CarFront size={31} /></div><p className="kicker">Ready when you are</p><h2>Never lose your parking spot again.</h2><p className="muted body-copy">Save your location, add a note about the block, and set a reminder before the meter or restriction begins.</p><button className="primary full" onClick={onSave}><MapPin size={19} /> Save my parking spot</button></>}<p className="safety"><Bell size={15} /> Always check posted parking signs.</p></aside>
     {showFullMap && <div className="full-map-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setShowFullMap(false)}><section className="full-map-dialog" role="dialog" aria-modal="true" aria-labelledby="full-map-title"><header><div><p className="eyebrow">ParkChi map</p><h2 id="full-map-title">{spot?.latitude ? 'Your parked car' : 'Chicago'}</h2></div><button className="close-button" onClick={() => setShowFullMap(false)} aria-label="Close full map"><X size={21} /></button></header><div className="full-map-canvas"><iframe title="Full interactive Chicago parking map" src={mapEmbed} loading="eager" referrerPolicy="strict-origin-when-cross-origin" /></div></section></div>}
   </div>;
 }
