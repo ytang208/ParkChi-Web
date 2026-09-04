@@ -66,6 +66,19 @@ export async function saveParkChiData(uid: string, data: unknown) {
   await set(ref(current.db, `users/${uid}/apps/parkchi`), { data: firebaseSafeData, schemaVersion: 2, updatedAt: serverTimestamp() });
 }
 
+export async function loadPinnedApps(uid: string) {
+  const current = services(); if (!current) return null;
+  const snapshot = await get(ref(current.db, `users/${uid}/preferences/pinnedApps`));
+  if (!snapshot.exists()) return null;
+  const value = snapshot.val() as string[] | { items?: string[] };
+  return Array.isArray(value) ? value : Array.isArray(value.items) ? value.items : [];
+}
+
+export async function savePinnedApps(uid: string, appIds: string[]) {
+  const current = services(); if (!current) return;
+  await set(ref(current.db, `users/${uid}/preferences/pinnedApps`), { items: appIds, updatedAt: Date.now() });
+}
+
 export function observeBarSocial(callback: (data: BarSocialData) => void) {
   const current = services(); if (!current) { callback({ rankings: [], reactions: {}, comments: {} }); return () => undefined; }
   let rankings: BarRanking[] = []; let reactions: Record<string, BarReaction[]> = {}; let comments: Record<string, BarComment[]> = {};

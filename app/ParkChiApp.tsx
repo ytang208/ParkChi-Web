@@ -1,20 +1,21 @@
 'use client';
 
-import { BatteryFull, Bell, CalendarClock, CalendarDays, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, Cloud, Compass, Grid3X3, ListTodo, LocateFixed, LogOut, MapPin, Navigation, Plus, Repeat2, Search, Share2, Signpost, Sparkles, Tag, Trash2, UserRound, WalletCards, Wifi, Wine, X } from 'lucide-react';
+import { BatteryFull, Bell, CalendarClock, CalendarDays, Camera, CarFront, Check, ChevronRight, CircleParking, Clock3, Cloud, Compass, Grid3X3, ListTodo, LocateFixed, LogOut, MapPin, Navigation, Pin, Plus, Repeat2, Search, Share2, Signpost, Sparkles, Tag, Trash2, UserRound, WalletCards, Wifi, Wine, X } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import BarSwipeApp from './BarSwipeApp';
-import { firebaseConfigured, loadParkChiData, observeUser, saveParkChiData, signInWithGoogle, signOutUser, type SignedInUser } from './firebase';
+import { firebaseConfigured, loadParkChiData, loadPinnedApps, observeUser, saveParkChiData, savePinnedApps, signInWithGoogle, signOutUser, type SignedInUser } from './firebase';
 
 type Tab = 'parked' | 'street' | 'renewals';
 type ParkingSpot = { note: string; savedAt: string; moveBy?: string; latitude?: number; longitude?: number; photo?: string };
 type StreetReminder = { id: string; title: string; details: string; date: string; repeat: boolean };
 type Renewal = { id: string; kind: string; date: string; note: string };
 type Snapshot = { spot: ParkingSpot | null; street: StreetReminder[]; renewals: Renewal[] };
-type LauncherApp = { name: string; detail: string; icon: React.ReactNode; tone: string; ready: boolean; action?: () => void };
+type LauncherApp = { id: string; name: string; detail: string; icon: React.ReactNode; tone: string; ready: boolean; action?: () => void };
 type ParkChiDocument = Document & { modelContext?: { registerTool: (tool: { name: string; title: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean; untrustedContentHint: boolean }; execute: (input: unknown) => unknown }, options?: { signal?: AbortSignal }) => void | Promise<void> } };
 
 const STORAGE_KEY = 'parkchi.web.v1';
 const STORAGE_OWNER_KEY = 'parkchi.web.owner.v1';
+const PINNED_APPS_KEY = 'parkchi.launcher.pinned.v1';
 const emptySnapshot: Snapshot = { spot: null, street: [], renewals: [] };
 const normalizeSnapshot = (value: unknown): Snapshot => {
   if (!value || typeof value !== 'object') return emptySnapshot;
@@ -109,19 +110,27 @@ function AccountControl({ user, authReady, onSignIn, onSignOut }: AccountProps) 
 }
 
 function AppLauncher({ onOpenParkChi, onOpenBars, ...account }: { onOpenParkChi: () => void; onOpenBars: () => void } & AccountProps) {
-  const [query, setQuery] = useState(''); const [notice, setNotice] = useState('');
+  const [query, setQuery] = useState(''); const [notice, setNotice] = useState(''); const [pinnedIds, setPinnedIds] = useState<string[]>(['parkchi']); const [pinsReady, setPinsReady] = useState(false); const [cloudPinsReady, setCloudPinsReady] = useState(false); const [draggedId, setDraggedId] = useState(''); const [dockActive, setDockActive] = useState(false);
   const now = new Date(); const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
   const apps: LauncherApp[] = [
-    { name: 'ParkChi', detail: 'Parking companion', icon: <CircleParking />, tone: 'parkchi', ready: true, action: onOpenParkChi },
-    { name: 'BarSwipe', detail: 'Rank North Side bars', icon: <Wine />, tone: 'barswipe', ready: true, action: onOpenBars },
-    { name: 'Chicago Events', detail: 'Find something fun', icon: <Compass />, tone: 'events', ready: false },
-    { name: 'Budget', detail: 'Track your spending', icon: <WalletCards />, tone: 'budget', ready: false },
-    { name: 'Tomorrow', detail: 'Plan your next day', icon: <ListTodo />, tone: 'tomorrow', ready: false },
-    { name: 'Deals', detail: 'Save nearby', icon: <Tag />, tone: 'deals', ready: false },
-    { name: 'Calendar', detail: 'See what is next', icon: <CalendarDays />, tone: 'calendar', ready: false },
+    { id: 'parkchi', name: 'ParkChi', detail: 'Parking companion', icon: <CircleParking />, tone: 'parkchi', ready: true, action: onOpenParkChi },
+    { id: 'barswipe', name: 'BarSwipe', detail: 'Rank North Side bars', icon: <Wine />, tone: 'barswipe', ready: true, action: onOpenBars },
+    { id: 'events', name: 'Chicago Events', detail: 'Find something fun', icon: <Compass />, tone: 'events', ready: false },
+    { id: 'budget', name: 'Budget', detail: 'Track your spending', icon: <WalletCards />, tone: 'budget', ready: false },
+    { id: 'tomorrow', name: 'Tomorrow', detail: 'Plan your next day', icon: <ListTodo />, tone: 'tomorrow', ready: false },
+    { id: 'deals', name: 'Deals', detail: 'Save nearby', icon: <Tag />, tone: 'deals', ready: false },
+    { id: 'calendar', name: 'Calendar', detail: 'See what is next', icon: <CalendarDays />, tone: 'calendar', ready: false },
   ];
   const visibleApps = apps.filter((app) => app.name.toLowerCase().includes(query.toLowerCase()));
+  const pinnedApps = pinnedIds.map((id) => apps.find((app) => app.id === id)).filter((app): app is LauncherApp => Boolean(app?.ready));
+  useEffect(() => { try { const saved = JSON.parse(localStorage.getItem(PINNED_APPS_KEY) || 'null'); if (Array.isArray(saved)) setPinnedIds(saved.filter((id): id is string => typeof id === 'string')); } catch { localStorage.removeItem(PINNED_APPS_KEY); } setPinsReady(true); }, []);
+  useEffect(() => { if (pinsReady) localStorage.setItem(PINNED_APPS_KEY, JSON.stringify(pinnedIds)); }, [pinnedIds, pinsReady]);
+  useEffect(() => { if (!pinsReady || !account.user) { setCloudPinsReady(false); return; } let active = true; void loadPinnedApps(account.user.uid).then((saved) => { if (!active) return; if (saved) setPinnedIds(saved); else void savePinnedApps(account.user!.uid, pinnedIds); setCloudPinsReady(true); }).catch(() => setCloudPinsReady(true)); return () => { active = false; }; }, [pinsReady, account.user?.uid]);
+  useEffect(() => { if (!account.user || !cloudPinsReady) return; const timer = window.setTimeout(() => { void savePinnedApps(account.user!.uid, pinnedIds); }, 350); return () => window.clearTimeout(timer); }, [pinnedIds, cloudPinsReady, account.user?.uid]);
   function openApp(app: LauncherApp) { if (app.ready && app.action) app.action(); else { setNotice(`${app.name} is coming soon.`); window.setTimeout(() => setNotice(''), 2200); } }
+  function pinApp(id: string) { const app = apps.find((item) => item.id === id); if (!app?.ready) return; setPinnedIds((items) => items.includes(id) ? items : [...items, id]); setNotice(`${app.name} pinned to your dock.`); window.setTimeout(() => setNotice(''), 1800); }
+  function unpinApp(id: string) { setPinnedIds((items) => items.filter((item) => item !== id)); }
+  function movePinned(sourceId: string, targetId: string) { setPinnedIds((items) => { const next = items.filter((id) => id !== sourceId); const target = next.indexOf(targetId); next.splice(target < 0 ? next.length : target, 0, sourceId); return next; }); }
   return <main className="launcher-shell">
     <div className="wallpaper-orb orb-one" /><div className="wallpaper-orb orb-two" />
     <header className="launcher-status"><strong>{now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</strong><span>My Apps</span><div><Wifi size={18} /><BatteryFull size={21} /></div></header>
@@ -134,9 +143,9 @@ function AppLauncher({ onOpenParkChi, onOpenBars, ...account }: { onOpenParkChi:
         <article className="date-widget"><span>{now.toLocaleDateString('en-US', { weekday: 'long' })}</span><strong>{now.getDate()}</strong><p>{now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p></article>
       </div>
       <label className="app-search"><Search size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search apps" /></label>
-      <section className="apps-section" aria-labelledby="apps-title"><div className="section-title"><h2 id="apps-title">Apps</h2><span>{apps.filter((app) => app.ready).length} available</span></div><div className="app-grid">{visibleApps.map((app) => <button className="app-tile" key={app.name} onClick={() => openApp(app)}><span className={`app-icon ${app.tone}`}>{app.icon}</span><span className="app-name">{app.name}</span><small>{app.detail}</small><em className={app.ready ? 'ready' : ''}>{app.ready ? 'Open' : 'Coming soon'}</em></button>)}</div>{visibleApps.length === 0 && <div className="no-apps">No apps match “{query}”.</div>}</section>
+      <section className="apps-section" aria-labelledby="apps-title"><div className="section-title"><h2 id="apps-title">Apps</h2><span>Drag an app to the dock or tap its pin</span></div><div className="app-grid">{visibleApps.map((app) => <div className={`app-tile ${draggedId === app.id ? 'dragging' : ''}`} key={app.id} draggable={app.ready} onDragStart={(event) => { setDraggedId(app.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', app.id); }} onDragEnd={() => { setDraggedId(''); setDockActive(false); }}><button className="app-open" onClick={() => openApp(app)}><span className={`app-icon ${app.tone}`}>{app.icon}</span><span className="app-name">{app.name}</span><small>{app.detail}</small><em className={app.ready ? 'ready' : ''}>{app.ready ? 'Open' : 'Coming soon'}</em></button>{app.ready && <button className={`app-pin ${pinnedIds.includes(app.id) ? 'pinned' : ''}`} aria-label={pinnedIds.includes(app.id) ? `Unpin ${app.name}` : `Pin ${app.name}`} title={pinnedIds.includes(app.id) ? 'Remove from dock' : 'Pin to dock'} onClick={() => pinnedIds.includes(app.id) ? unpinApp(app.id) : pinApp(app.id)}><Pin size={15} fill={pinnedIds.includes(app.id) ? 'currentColor' : 'none'} /></button>}</div>)}</div>{visibleApps.length === 0 && <div className="no-apps">No apps match “{query}”.</div>}</section>
     </section>
-    <div className="launcher-dock"><button onClick={onOpenParkChi}><span className="dock-icon parkchi"><CircleParking /></span><small>ParkChi</small></button><span className="dock-divider" /><div><Grid3X3 size={20} /><span>More apps are on the way</span></div></div>
+    <div className={`launcher-dock ${dockActive ? 'drop-ready' : ''}`} onDragOver={(event) => { event.preventDefault(); setDockActive(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDockActive(false); }} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData('text/plain') || draggedId; pinApp(id); setDraggedId(''); setDockActive(false); }} aria-label="Pinned apps dock">{pinnedApps.map((app) => <div className="dock-app" key={app.id} draggable onDragStart={(event) => { event.stopPropagation(); setDraggedId(app.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', app.id); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const source = event.dataTransfer.getData('text/plain') || draggedId; if (source) movePinned(source, app.id); setDraggedId(''); setDockActive(false); }}><button className="dock-open" onClick={() => openApp(app)}><span className={`dock-icon ${app.tone}`}>{app.icon}</span><small>{app.name}</small></button><button className="dock-remove" onClick={() => unpinApp(app.id)} aria-label={`Unpin ${app.name}`} title="Remove from dock"><X size={12} /></button></div>)}<span className="dock-divider" /><div className="dock-hint"><Grid3X3 size={20} /><span>{pinnedApps.length ? 'Drop apps here' : 'Pin your favorite apps'}</span></div></div>
     {notice && <div className="launcher-notice" role="status">{notice}</div>}
   </main>;
 }
