@@ -36,7 +36,7 @@ export function observeUser(callback: (user: User | null) => void) {
 
 export async function signInWithGoogle() {
   const current = services();
-  if (!current) throw new Error('Firebase has not been connected yet.');
+  if (!current) throw new Error('Google sign-in has not been connected yet.');
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   const result = await signInWithPopup(current.auth, provider);
@@ -82,7 +82,7 @@ export function observeBarSocial(callback: (data: BarSocialData) => void) {
 }
 
 export async function saveBarRanking(user: SignedInUser, ranking: Pick<BarRanking, 'barId' | 'barName' | 'neighborhood' | 'choice'>) {
-  const current = services(); if (!current) throw new Error('Firebase is unavailable.');
+  const current = services(); if (!current) throw new Error('Account sync is unavailable.');
   await set(ref(current.db, `barRankings/${ranking.barId}/${user.uid}`), {
     ...ranking,
     uid: user.uid,
@@ -91,19 +91,24 @@ export async function saveBarRanking(user: SignedInUser, ranking: Pick<BarRankin
   });
 }
 
+export async function deleteBarRanking(user: SignedInUser, barId: string) {
+  const current = services(); if (!current) throw new Error('Account sync is unavailable.');
+  await remove(ref(current.db, `barRankings/${barId}/${user.uid}`));
+}
+
 export async function updateBarPostText(user: SignedInUser, barId: string, choice: 'like' | 'pass', postText: string) {
-  const current = services(); if (!current) throw new Error('Firebase is unavailable.');
+  const current = services(); if (!current) throw new Error('Account sync is unavailable.');
   await update(ref(current.db, `barRankings/${barId}/${user.uid}`), { choice, postText: postText.trim(), updatedAt: Date.now() });
 }
 
 export async function setBarReaction(user: SignedInUser, postKey: string, type: 'like' | 'dislike' | null) {
-  const current = services(); if (!current) throw new Error('Firebase is unavailable.');
+  const current = services(); if (!current) throw new Error('Account sync is unavailable.');
   const target = ref(current.db, `barPostReactions/${postKey}/${user.uid}`);
   if (!type) await remove(target);
   else await set(target, { uid: user.uid, displayName: user.displayName || user.email?.split('@')[0] || 'Chicago user', type, updatedAt: Date.now() });
 }
 
 export async function addBarComment(user: SignedInUser, postKey: string, text: string) {
-  const current = services(); if (!current) throw new Error('Firebase is unavailable.');
+  const current = services(); if (!current) throw new Error('Account sync is unavailable.');
   await set(push(ref(current.db, `barPostComments/${postKey}`)), { uid: user.uid, displayName: user.displayName || user.email?.split('@')[0] || 'Chicago user', text: text.trim(), createdAt: Date.now() });
 }

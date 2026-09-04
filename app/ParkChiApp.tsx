@@ -105,7 +105,7 @@ type AccountProps = { user: SignedInUser | null; authReady: boolean; authNotice:
 
 function AccountControl({ user, authReady, onSignIn, onSignOut }: AccountProps) {
   if (!authReady) return <span className="account-loading">Checking account…</span>;
-  return user ? <div className="account-menu"><span className="account-avatar">{(user.displayName || user.email || 'G').slice(0, 1).toUpperCase()}</span><span><strong>{user.displayName || 'Google user'}</strong><small>Synced with Firebase</small></span><button onClick={onSignOut} aria-label="Sign out"><LogOut size={17} /></button></div> : <button className="google-signin" onClick={onSignIn} disabled={!firebaseConfigured}><span className="google-logo">G</span> Sign in with Google</button>;
+  return user ? <div className="account-menu"><span className="account-avatar">{(user.displayName || user.email || 'G').slice(0, 1).toUpperCase()}</span><span><strong>{user.displayName || 'Google user'}</strong><small>Synced with Google</small></span><button onClick={onSignOut} aria-label="Sign out"><LogOut size={17} /></button></div> : <button className="google-signin" onClick={onSignIn} disabled={!firebaseConfigured}><span className="google-logo">G</span> Sign in with Google</button>;
 }
 
 function AppLauncher({ onOpenParkChi, onOpenBars, ...account }: { onOpenParkChi: () => void; onOpenBars: () => void } & AccountProps) {
@@ -128,7 +128,7 @@ function AppLauncher({ onOpenParkChi, onOpenBars, ...account }: { onOpenParkChi:
     <section className="launcher-content">
       <div className="launcher-heading-row"><div className="launcher-heading"><p>{greeting}{account.user ? `, ${account.user.displayName?.split(' ')[0] || 'friend'}` : ''}</p><h1>What would you like to do?</h1></div><AccountControl {...account} /></div>
       {account.authNotice && <p className="auth-notice" role="status">{account.authNotice}</p>}
-      {!firebaseConfigured && <p className="auth-setup-note"><Cloud size={16} /> Google sign-in will appear after Firebase is connected.</p>}
+      {!firebaseConfigured && <p className="auth-setup-note"><Cloud size={16} /> Google sign-in is being connected.</p>}
       <div className="launcher-widgets">
         <article className="city-widget"><div><span>CHICAGO</span><h2>Your city, simplified.</h2><p>Useful tools for everyday life, all in one place.</p></div><span className="city-star"><Sparkles size={26} /></span></article>
         <article className="date-widget"><span>{now.toLocaleDateString('en-US', { weekday: 'long' })}</span><strong>{now.getDate()}</strong><p>{now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p></article>
